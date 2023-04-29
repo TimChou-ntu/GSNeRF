@@ -51,8 +51,6 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning import LightningModule, Trainer, loggers
 from pytorch_lightning.loggers import WandbLogger
-# for debugging
-import time
 
 import os
 import time
@@ -210,8 +208,6 @@ class GeoNeRF(LightningModule):
             train_batch_size=self.hparams.batch_size,
             target_img=unpre_imgs[0, -1],
             target_depth=batch["depths_h"][0, -1],
-            # dir_z_inverse=True if self.hparams.dataset_name == "klevr" else False,
-            dir_z_inverse=False,
         )
         # debug
         # torch.save(rays_pts, f"../visualize_train_tmp_scale/rays_pts{batch_nb}.pt")
@@ -405,8 +401,6 @@ class GeoNeRF(LightningModule):
                     nb_views=nb_views,
                     chunk=self.hparams.chunk,
                     chunk_idx=chunk_idx,
-                    # dir_z_inverse=True if self.hparams.dataset_name == "klevr" else False,
-                    dir_z_inverse=False,
                 )
                 # torch.save(rays_pts, f"../visualize_tmp_scale/rays_pts{chunk_idx}.pt")
                 # time.sleep(100)
@@ -500,11 +494,11 @@ class GeoNeRF(LightningModule):
             )
 
             os.makedirs(
-                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/rendered_results/",
+                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/rendered_results/{self.global_step:08d}/",
                 exist_ok=True,
             )
             imageio.imwrite(
-                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/rendered_results/{self.wr_cntr:03d}.png",
+                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/rendered_results/{self.global_step:08d}/{self.wr_cntr:03d}.png",
                 (
                     rendered_rgb.detach().permute(1, 2, 0).clip(0.0, 1.0).cpu().numpy()
                     * 255
@@ -512,11 +506,11 @@ class GeoNeRF(LightningModule):
             )
 
             os.makedirs(
-                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/evaluation/",
+                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/evaluation/{self.global_step:08d}/",
                 exist_ok=True,
             )
             imageio.imwrite(
-                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/evaluation/{self.global_step:08d}_{self.wr_cntr:02d}.png",
+                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/evaluation/{self.global_step:08d}/{self.wr_cntr:02d}.png",
                 (img_vis * 255).astype("uint8"),
             )
 
@@ -526,6 +520,8 @@ class GeoNeRF(LightningModule):
         return loss
 
     def on_validation_epoch_end(self):
+        # recount the number of rendered images
+        self.wr_cntr = 0
         outputs = self.validation_step_outputs
         mean_psnr = torch.stack([x["val_psnr"] for x in outputs]).mean()
         mean_ssim = np.stack([x["val_ssim"] for x in outputs]).mean()

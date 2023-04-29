@@ -128,7 +128,7 @@ def get_finetuning_dataset(args, downsample=1.0):
 
 def get_validation_dataset(args, downsample=1.0):
     if args.scene == "None":
-        max_len = 2
+        max_len = 10
     else:
         max_len = -1
 

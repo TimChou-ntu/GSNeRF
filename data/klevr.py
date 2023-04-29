@@ -242,7 +242,6 @@ class KlevrDataset(Dataset):
                 # hard code to cuda
                 intrinsics_target=torch.tensor(intrinsics[i].astype(imgs.dtype)),
                 c2w_target=torch.tensor(c2ws[i].astype(imgs.dtype)),
-                dir_z_inverse=False,
                 # hard code to 1
                 train_batch_size=1,
             )

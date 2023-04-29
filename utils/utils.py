@@ -237,7 +237,6 @@ def get_rays(
     train=True,
     train_batch_size=-1,
     mask=None,
-    dir_z_inverse=False,
 ):
     if train:
         if mask is None:
@@ -265,26 +264,14 @@ def get_rays(
                 ys[chunk_id * chunk : (chunk_id + 1) * chunk],
                 xs[chunk_id * chunk : (chunk_id + 1) * chunk],
             )
-    # -torch.ones_like(xs) for Klevr dataset
-    if dir_z_inverse:
-        dirs = torch.stack(
-            [
-                (xs - intrinsics_target[0, 2]) / intrinsics_target[0, 0],
-                -(ys - intrinsics_target[1, 2]) / intrinsics_target[1, 1],
-                -1*torch.ones_like(xs),
-                # torch.ones_like(xs),
-            ],
-            -1,
-        )  # use -1 as original NeRF
-    else:
-        dirs = torch.stack(
-            [
-                (xs - intrinsics_target[0, 2]) / intrinsics_target[0, 0],
-                (ys - intrinsics_target[1, 2]) / intrinsics_target[1, 1],
-                torch.ones_like(xs),
-            ],
-            -1,
-        )  # use 1 instead of -1
+    dirs = torch.stack(
+        [
+            (xs - intrinsics_target[0, 2]) / intrinsics_target[0, 0],
+            (ys - intrinsics_target[1, 2]) / intrinsics_target[1, 1],
+            torch.ones_like(xs),
+        ],
+        -1,
+    )  # use 1 instead of -1
     # Translate camera frame's origin to the world frame. It is the origin of all rays.
     rays_dir = (
         dirs @ c2w_target[:3, :3].t()
@@ -430,8 +417,6 @@ def get_rays_pts(
     train_batch_size=-1,
     target_img=None,
     target_depth=None,
-    # dir_z_inverse means klevr dataset
-    dir_z_inverse=False,
 ):
     if train:
         if target_depth.sum() > 0:
@@ -451,7 +436,6 @@ def get_rays_pts(
         train=train,
         train_batch_size=train_batch_size,
         mask=depth_mask,
-        dir_z_inverse=dir_z_inverse,
     )
 
     ## Extracting ground truth color and depth of target view
