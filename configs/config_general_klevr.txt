@@ -1,0 +1,17 @@
+### INPUT
+expname = Generalizable_without_self_supervision_depth_scale_11
+logdir = ./logs_klevr/
+nb_views = 6
+
+## dataset
+dataset_name = klevr
+klevr_path = /home/timothy/Desktop/2023Spring/GeoNeRF/data/data/nesf_data/klevr/
+scene = None
+
+### TESTING
+chunk = 4096  ### Reduce it to save memory
+
+### TRAINING
+num_steps = 250000
+lrate = 0.0005
+logger = wandb

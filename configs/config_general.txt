@@ -1,0 +1,22 @@
+### INPUT
+expname = Generalizable_no_depth
+logdir = ./logs
+nb_views = 6
+
+## dataset
+dataset_name = dtu
+dtu_path = ../../GeoNeRF/data/data/dataset_zip/
+dtu_pre_path = ../../GeoNeRF/data/data/dtu/
+llff_path = ../../GeoNeRF/data/data/real_iconic_noface/
+ibrnet1_path = ../../GeoNeRF/data/data/ibrnet_collected_1/
+ibrnet2_path = ../../GeoNeRF/data/data/ibrnet_collected_2/
+nerf_path = .../../my_nerf/nerf_synthetic/
+llff_test_path = ../../GeoNeRF/data/data/nerf_llff_data/
+scene = None
+
+### TESTING
+chunk = 4096  ### Reduce it to save memory
+
+### TRAINING
+num_steps = 250000
+lrate = 0.0005
