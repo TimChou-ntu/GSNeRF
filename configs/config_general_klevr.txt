@@ -1,5 +1,5 @@
 ### INPUT
-expname = Generalizable_without_self_supervision_depth_scale_11
+expname = Generalizable_without_self_supervision_depth
 logdir = ./logs_klevr/
 nb_views = 6
 

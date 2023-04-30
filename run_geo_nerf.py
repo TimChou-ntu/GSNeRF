@@ -590,7 +590,7 @@ if __name__ == "__main__":
     if args.logger == "wandb":
         logger = WandbLogger(
             name=args.expname,
-            project="GeoNeRF",
+            project="generalized_nerf",
             save_dir=f"{args.logdir}/{args.dataset_name}",
             resume="allow",
             id=args.expname,

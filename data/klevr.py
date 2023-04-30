@@ -71,47 +71,42 @@ class KlevrDataset(Dataset):
         self.scan_idx_to_name = {}
 
         # record ids that being used of each scan
-        self.id_dict = {}
+        self.id_list = []
 
-        # read each scan's metadata to get the src/ref ids
+        # read the pair file, here use the same pair list as dtu dataset; 
+        # could be 6x more pairs since each klevr scene have 300 views, dtu have 50 views
+        if self.split == "train":
+            if self.scene == "None":
+                pair_file = f"configs/lists/dtu_pairs.txt"
+            else:
+                pair_file = f"configs/lists/dtu_pairs_ft.txt"
+        else:
+            pair_file = f"configs/lists/dtu_pairs_val.txt"
+
         for scan_idx, meta_filename in enumerate(self.scans):
-            with open(os.path.join(meta_filename, 'metadata.json'), "r") as f:
+            with open(pair_file) as f:
                 scan = meta_filename.split('/')[-1]
                 self.scan_idx_to_name[scan_idx] = scan
-                meta = json.load(f)
-                all_src_ids = sorted(meta['split_ids']['train'])
-                all_ref_ids = sorted(meta['split_ids']['test'])
+                num_viewpoint = int(f.readline())
+                for _ in range(num_viewpoint):
+                    ref_view = int(f.readline().rstrip())
+                    src_views = [int(x) for x in f.readline().rstrip().split()[1::2]]
+                    self.metas += [(scan_idx, ref_view, src_views[:self.nb_views])]
+                    self.id_list.append([ref_view] + src_views)
 
-                # Unlike dtu, we select only nb_views of the src_ids in metas
-                for i, ref_id in enumerate(all_ref_ids):
-                    src_position = int(i*(len(all_src_ids)//len(all_ref_ids)))
-                    if src_position + self.nb_views >= len(all_src_ids):
-                        src_position = len(all_src_ids) - self.nb_views - 1
-                    src_ids = [all_src_ids[int(src_position+j)] for j in range(self.nb_views)]
-                    self.metas += [(scan_idx, ref_id, src_ids)]
-                    
-                    # record the ids that being used
-                    if scan_idx not in self.id_dict:
-                        self.id_dict[scan_idx] = []
-                    self.id_dict[scan_idx] += [ref_id]
-                    self.id_dict[scan_idx] += src_ids
-            self.id_dict[scan_idx] = np.unique(self.id_dict[scan_idx])
+        self.id_list = np.unique(self.id_list)
         self.build_remap()
 
     def build_remap(self):
-        # build reamp for each scan_idx's position and frame_id
-        self.remap = {}
-        for scan_idx in self.id_dict:
-            self.remap[scan_idx] = np.zeros(np.max(self.id_dict[scan_idx]) +1).astype("int")
-            for i, frame_id in enumerate(self.id_dict[scan_idx]):
-                # frame_id is the position of the frame in the scan, i is the position of the frame in the id_dict
-                self.remap[scan_idx][frame_id] = i
+        self.remap = np.zeros(np.max(self.id_list) + 1).astype("int")
+        for i, item in enumerate(self.id_list):
+            self.remap[item] = i
 
     def buid_proj_mats(self):
         # maybe not calculate near_far now. Do it when creating the rays
         self.near_fars, self.intrinsics, self.world2cams, self.cam2worlds = None, {}, {}, {}
-        for scan_idx in self.id_dict:
-            meta_filename = os.path.join(self.scans[scan_idx], 'metadata.json')
+        for scan_idx, meta_fileprefix in enumerate(self.scans):
+            meta_filename = os.path.join(meta_fileprefix, 'metadata.json')
             intrinsic, world2cam, cam2world = self.read_cam_file(meta_filename, scan_idx)
             self.intrinsics[scan_idx], self.world2cams[scan_idx], self.cam2worlds[scan_idx] = np.array(intrinsic), np.array(world2cam), np.array(cam2world)
             
@@ -135,7 +130,7 @@ class KlevrDataset(Dataset):
         camera_positions = np.array(meta['camera']['positions'])
         camera_quaternions = np.array(meta['camera']['quaternions'])
         # calculate camera pose of each frame that will be used (in this scan idx)
-        for frame_id in self.id_dict[scan_idx]:
+        for frame_id in self.id_list:
             c2w = from_position_and_quaternion(camera_positions[frame_id], camera_quaternions[frame_id], False).tolist()
             # not sure
             c2w = np.array(c2w) @ self.blender2opencv
@@ -185,7 +180,7 @@ class KlevrDataset(Dataset):
             img = self.transform(np.array(img)[:,:,:3])
             imgs += [img]
 
-            index = self.remap[scan_idx][vid]
+            index = self.remap[vid]
             # # debug
             # print("vid: ", vid, "index: ", index, "scan_idx: ", scan_idx)
             # print("self.remap[scan_idx]: ", self.remap[scan_idx])
