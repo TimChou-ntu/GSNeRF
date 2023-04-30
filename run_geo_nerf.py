@@ -566,7 +566,7 @@ class GeoNeRF(LightningModule):
 
 if __name__ == "__main__":
     # torch.set_default_dtype(torch.float32)
-    # torch.set_float32_matmul_precision(precision="high")
+    torch.set_float32_matmul_precision(precision="high")
     args = config_parser()
     geonerf = GeoNeRF(args)
 
@@ -577,10 +577,6 @@ if __name__ == "__main__":
     else:
         ckpt_file = None
 
-    # from checkpoint import CheckpointEveryNSteps
-    # checkpoint_callback_every_n_steps = CheckpointEveryNSteps(
-    #     save_step_frequency=5400,
-    # )
 
     ## Setting a callback to automatically save checkpoints
     checkpoint_callback = ModelCheckpoint(
@@ -608,7 +604,6 @@ if __name__ == "__main__":
         logger = None
 
     args.use_amp = False if args.eval else True
-    # args.use_amp = False 
     trainer = Trainer(
         max_steps=args.num_steps,
         callbacks=[checkpoint_callback],

@@ -127,7 +127,7 @@ def calculate_near_and_far(rays_o, rays_d, bbox_min=[-1.,-1.,-1.], bbox_max=[1.,
 
     min_intersections = torch.amax(torch.amin(intersections, dim=-1), dim=-1, keepdim=True)
     max_intersections = torch.amin(torch.amax(intersections, dim=-1), dim=-1, keepdim=True)
-    epsilon = 1e-3*torch.ones_like(min_intersections)
+    epsilon = 1e-1*torch.ones_like(min_intersections)
     near = torch.maximum(epsilon, min_intersections)
     # tmp = near
     near = torch.where((near > max_intersections), epsilon, near)
