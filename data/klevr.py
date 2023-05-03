@@ -163,6 +163,7 @@ class KlevrDataset(Dataset):
         
         affine_mats, affine_mats_inv = [], []
         imgs = []
+        semantics = []
         intrinsics, w2cs, c2ws = [], [], []
 
         # intrinsic now every frame has its own intrinsic, but actually it is the same for all frames in a scan
@@ -175,10 +176,18 @@ class KlevrDataset(Dataset):
             img_wh = np.round(np.array(img.size)*self.downSample).astype(np.int32)
             
             # originally NeRF use Image.Resampling.LANCZOS, not sure if BICUBIC is better
-            img = img.resize(img_wh, Image.BICUBIC)
+            img = img.resize(img_wh, Image.LANCZOS)
             # discard the alpha channel, only use rgb. Maybe need "valid_mask = img[-1]>0"
             img = self.transform(np.array(img)[:,:,:3])
             imgs += [img]
+
+            # semantic part
+            if self.get_semantic:
+                semantic_filename = os.path.join(self.root_dir, self.scan_idx_to_name[scan_idx],f'segmentation_{vid:05d}.png')
+                semantic = Image.open(semantic_filename)
+                semantic = semantic.resize(img_wh, Image.LANCZOS)
+                semantic = torch.from_numpy(np.array(semantic)).long() #(h,w) 
+                semantics += [semantic]
 
             index = self.remap[vid]
             # # debug
@@ -212,6 +221,7 @@ class KlevrDataset(Dataset):
             affine_mats_inv.append(aff_inv)
 
         imgs = np.stack(imgs)
+        semantics = np.stack(semantics)
         affine_mats = np.stack(affine_mats)
         affine_mats_inv = np.stack(affine_mats_inv)
         intrinsics = np.stack(intrinsics)
@@ -247,6 +257,8 @@ class KlevrDataset(Dataset):
 
         sample = {}
         sample['images'] = imgs
+        if self.get_semantic:
+            sample['semantics'] = semantics
         sample['w2cs'] = w2cs.astype(imgs.dtype)
         sample['c2ws'] = c2ws.astype(imgs.dtype)
         sample['intrinsics'] = intrinsics.astype(imgs.dtype)

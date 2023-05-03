@@ -1,49 +1,3 @@
-# GeoNeRF is a generalizable NeRF model that renders novel views
-# without requiring per-scene optimization. This software is the 
-# implementation of the paper "GeoNeRF: Generalizing NeRF with 
-# Geometry Priors" by Mohammad Mahdi Johari, Yann Lepoittevin,
-# and Francois Fleuret.
-
-# Copyright (c) 2022 ams International AG
-
-# This file is part of GeoNeRF.
-# GeoNeRF is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License version 3 as
-# published by the Free Software Foundation.
-
-# GeoNeRF is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with GeoNeRF. If not, see <http://www.gnu.org/licenses/>.
-
-# This file incorporates work covered by the following copyright and  
-# permission notice:
-
-    # MIT License
-
-    # Copyright (c) 2021 apchenstu
-
-    # Permission is hereby granted, free of charge, to any person obtaining a copy
-    # of this software and associated documentation files (the "Software"), to deal
-    # in the Software without restriction, including without limitation the rights
-    # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    # copies of the Software, and to permit persons to whom the Software is
-    # furnished to do so, subject to the following conditions:
-
-    # The above copyright notice and this permission notice shall be included in all
-    # copies or substantial portions of the Software.
-
-    # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    # SOFTWARE.
-
 import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -73,6 +27,7 @@ from utils.utils import (
     acc_threshold,
     abs_error,
     visualize_depth,
+    seed_everything,
 )
 from utils.options import config_parser
 from data.get_datasets import (
@@ -228,7 +183,9 @@ class GeoNeRF(LightningModule):
 
         # Supervising depth maps with either ground truth depth or self-supervision loss
         # This loss is only used in the generalizable model
-        if self.hparams.scene == "None":
+        # Not using right now
+        # if self.hparams.scene == "None":
+        if False:
             ## if ground truth is available
             if isinstance(batch["depths"], dict):
                 loss = loss + 1 * self.depth_loss(depth_map, batch["depths"])
@@ -321,10 +278,9 @@ class GeoNeRF(LightningModule):
             opt = self.optimizers()
             sch = self.lr_schedulers()
 
-            opt.zero_grad()
             self.manual_backward(loss)
             # clip gradients, not sure whether gradient explosion will happen
-            self.clip_gradients(opt, gradient_clip_val=0.5, gradient_clip_algorithm="norm")
+            self.clip_gradients(opt, gradient_clip_val=2, gradient_clip_algorithm="value")
 
             # Warming up the learning rate
             if self.trainer.global_step < self.hparams.warmup_steps:
@@ -338,6 +294,7 @@ class GeoNeRF(LightningModule):
             
             opt.step()
             sch.step()
+            opt.zero_grad()
 
             return {"loss": loss}
 
@@ -493,17 +450,17 @@ class GeoNeRF(LightningModule):
                 .numpy()
             )
 
-            os.makedirs(
-                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/rendered_results/{self.global_step:08d}/",
-                exist_ok=True,
-            )
-            imageio.imwrite(
-                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/rendered_results/{self.global_step:08d}/{self.wr_cntr:03d}.png",
-                (
-                    rendered_rgb.detach().permute(1, 2, 0).clip(0.0, 1.0).cpu().numpy()
-                    * 255
-                ).astype("uint8"),
-            )
+            # os.makedirs(
+            #     f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/rendered_results/{self.global_step:08d}/",
+            #     exist_ok=True,
+            # )
+            # imageio.imwrite(
+            #     f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/rendered_results/{self.global_step:08d}/{self.wr_cntr:03d}.png",
+            #     (
+            #         rendered_rgb.detach().permute(1, 2, 0).clip(0.0, 1.0).cpu().numpy()
+            #         * 255
+            #     ).astype("uint8"),
+            # )
 
             os.makedirs(
                 f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/evaluation/{self.global_step:08d}/",
@@ -514,13 +471,13 @@ class GeoNeRF(LightningModule):
                 (img_vis * 255).astype("uint8"),
             )
 
-            print(f"Image {self.wr_cntr:02d} rendered.")
             self.wr_cntr += 1
         self.validation_step_outputs.append(loss)
         return loss
 
     def on_validation_epoch_end(self):
         # recount the number of rendered images
+        print(f"Image {self.wr_cntr:02d} rendered.")
         self.wr_cntr = 0
         outputs = self.validation_step_outputs
         mean_psnr = torch.stack([x["val_psnr"] for x in outputs]).mean()
@@ -568,6 +525,7 @@ if __name__ == "__main__":
     # torch.set_default_dtype(torch.float32)
     torch.set_float32_matmul_precision(precision="high")
     args = config_parser()
+    seed_everything(args.seed)
     geonerf = GeoNeRF(args)
 
     ## Checking to logdir to see if there is any checkpoint file to continue with
@@ -625,13 +583,14 @@ if __name__ == "__main__":
             load_ckpt(geonerf.renderer, ckpt_file, "renderer")
         elif not args.use_depth:  ## Generalizable
             ## Loading the pretrained weights from Cascade MVSNet
-            print("!!!Loading pretrained weights from Cascade MVSNet!!!")
-            torch.utils.model_zoo.load_url(
-                "https://github.com/kwea123/CasMVSNet_pl/releases/download/1.5/epoch.15.ckpt",
-                model_dir="pretrained_weights",
-            )
-            ckpt_file = "pretrained_weights/epoch.15.ckpt"
-            load_ckpt(geonerf.geo_reasoner, ckpt_file, "model", strict=False)
+            print("!!! NOT Loading pretrained weights from Cascade MVSNet!!!")
+            # print("!!!Loading pretrained weights from Cascade MVSNet!!!")
+            # torch.utils.model_zoo.load_url(
+            #     "https://github.com/kwea123/CasMVSNet_pl/releases/download/1.5/epoch.15.ckpt",
+            #     model_dir="pretrained_weights",
+            # )
+            # ckpt_file = "pretrained_weights/epoch.15.ckpt"
+            # load_ckpt(geonerf.geo_reasoner, ckpt_file, "model", strict=False)
 
         # geonerf = torch.compile(geonerf, mode="reduce-overhead")
 
@@ -644,8 +603,8 @@ if __name__ == "__main__":
             if args.use_depth:
                 ckpt_file = "pretrained_weights/pretrained_w_depth.ckpt"
             else:
-                ckpt_file = "pretrained_weights/pretrained.ckpt"
-        load_ckpt(geonerf.geo_reasoner, ckpt_file, "geo_reasoner")
-        load_ckpt(geonerf.renderer, ckpt_file, "renderer")
+                ckpt_file = args.ckpt_path
+        # load_ckpt(geonerf.geo_reasoner, ckpt_file, "geo_reasoner")
+        # load_ckpt(geonerf.renderer, ckpt_file, "renderer")
 
-        trainer.validate(geonerf)
+        trainer.validate(geonerf, ckpt_path=ckpt_file)

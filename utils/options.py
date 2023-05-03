@@ -56,5 +56,8 @@ def config_parser():
     parser.add_argument("--logdir", type=str, default="./logs/", help="Where to store ckpts and logs")
     parser.add_argument("--eval", action="store_true", help="Render and evaluate the test set")
     parser.add_argument("--use_depth", action="store_true", help="Use ground truth low-res depth maps in rendering process")
+    parser.add_argument("--seed", type=int, default=0, help="Random seed")
 
+    # resume options
+    parser.add_argument("--ckpt_path", type=str, default=None, help="Path to a checkpoint to resume training")
     return parser.parse_args()

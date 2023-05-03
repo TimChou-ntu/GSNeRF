@@ -1,5 +1,5 @@
 ### INPUT
-expname = Generalizable_without_self_supervision_depth_NO_pretrain_MVS_weight
+expname = Generalizable_without_self_supervision_depth
 logdir = ./logs_klevr/
 nb_views = 6
 
@@ -15,4 +15,3 @@ chunk = 4096  ### Reduce it to save memory
 num_steps = 250000
 lrate = 0.0005
 logger = wandb
-batch_size = 1024

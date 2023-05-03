@@ -219,9 +219,11 @@ class CostRegNet(nn.Module):
         x = conv0 + self.conv11(x)
         del conv0
         ####################
+        # x1 = self.br1(x)
+        # with torch.enable_grad():
+        #     x2 = self.br2(x)
         x1 = self.br1(x)
-        with torch.enable_grad():
-            x2 = self.br2(x)
+        x2 = self.br2(x)
         ####################
         p = self.prob(x1)
 

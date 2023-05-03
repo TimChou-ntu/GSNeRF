@@ -48,7 +48,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
-
+import random
 import numpy as np
 import cv2
 import re
@@ -60,8 +60,15 @@ from utils.klevr_utils import scale_rays, calculate_near_and_far
 img2mse = lambda x, y: torch.mean((x - y) ** 2)
 mse2psnr = lambda x: -10.0 * torch.log(x) / torch.log(torch.Tensor([10.0]).to(x.device))
 
+def seed_everything(seed=1234):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
 
 def load_ckpt(network, ckpt_file, key_prefix, strict=True):
+    print("loading ckpt from ", ckpt_file, " ...")
     ckpt_dict = torch.load(ckpt_file)
 
     if "state_dict" in ckpt_dict.keys():
@@ -457,7 +464,7 @@ def get_rays_pts(
     else:
         near, far = near_fars[0, -1, 0], near_fars[0, -1, 1]  ## near/far of the target view
         # near, far = 3, 17  ## near/far of the target view
-    assert (near < far, "near should be smaller than far")
+    assert near < far, "near should be smaller than far"
     
     # travel along the rays
     W_H = torch.tensor([W - 1, H - 1]).to(rays_orig.device)
