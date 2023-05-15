@@ -25,6 +25,10 @@ def config_parser():
     parser = configargparse.ArgumentParser()
     parser.add_argument("--config", is_config_file=True, help="Config file path")
 
+    # Task options
+    parser.add_argument("--segmentation", action="store_true", help="Use segmentation mask for training")
+    parser.add_argument("--nb_class", type=int, default=6, help="Number of classes for segmentation")
+
     # Datasets options
     parser.add_argument("--dataset_name", type=str, default="llff", choices=["llff", "nerf", "dtu", "klevr"],)
     parser.add_argument("--llff_path", type=str, help="Path to llff dataset")

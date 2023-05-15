@@ -263,7 +263,7 @@ def get_rays(
             xs, ys = xs[:train_batch_size], ys[:train_batch_size]
     else:
         ys, xs = torch.meshgrid(
-            torch.linspace(0, H - 1, H), torch.linspace(0, W - 1, W)
+            torch.linspace(0, H - 1, H), torch.linspace(0, W - 1, W), indexing="ij"
         )  # pytorch's meshgrid has indexing='ij'
         ys, xs = ys.to(intrinsics_target.device).reshape(-1), xs.to(intrinsics_target.device).reshape(-1)
         if chunk > 0:
@@ -424,6 +424,7 @@ def get_rays_pts(
     train_batch_size=-1,
     target_img=None,
     target_depth=None,
+    target_segmentation=None,
 ):
     if train:
         if target_depth.sum() > 0:
@@ -449,10 +450,15 @@ def get_rays_pts(
     if train:
         rays_pixs_int = rays_pixs.long()
         rays_gt_rgb = target_img[:, rays_pixs_int[0], rays_pixs_int[1]].permute(1, 0)
+        if target_segmentation is not None:
+            rays_gt_semantic = target_segmentation[rays_pixs_int[0], rays_pixs_int[1]]
+        else:
+            rays_gt_semantic = None
         rays_gt_depth = target_depth[rays_pixs_int[0], rays_pixs_int[1]]
     else:
         rays_gt_rgb = None
         rays_gt_depth = None
+        rays_gt_semantic = None
 
     # klevr dataset have scene boundaries, se can scale the rays and calculate the near/far
     # all klevr dataset have the same scene boundaries: "min": [-3.1, -3.1, -0.1], "max": [3.1, 3.1, 3.1]
@@ -489,6 +495,7 @@ def get_rays_pts(
         ray_pts_ndc,
         rays_dir,
         rays_gt_rgb,
+        rays_gt_semantic,
         rays_gt_depth,
         rays_pixs,
     )
@@ -700,3 +707,14 @@ def get_nearest_pose_ids(
     selected_ids = sorted_ids[:num_select]
 
     return selected_ids
+
+lable_color_map = np.array([
+       [0.        , 0.        , 0.        ],
+       [0.        , 0.        , 1.        ],
+       [1.        , 0.        , 0.        ],
+       [0.        , 1.        , 0.        ],
+       [0.        , 0.        , 0.35294118],
+       [0.        , 0.31372549, 0.39215686],
+       [0.        , 0.        , 0.90196078],
+       [0.46666667, 0.04313725, 0.1254902 ],
+       [0.        , 0.        , 0.55686275]])

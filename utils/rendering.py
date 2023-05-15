@@ -118,11 +118,13 @@ def sigma2weights(sigma):
 def volume_rendering(rgb_sigma, pts_depth):
     rgb = rgb_sigma[..., :3]
     weights = sigma2weights(rgb_sigma[..., 3])
+    semantic = rgb_sigma[..., 4:]
 
     rendered_rgb = torch.sum(weights[..., None] * rgb, -2)
+    rendered_semantic = torch.sum(weights[..., None] * semantic, -2)
     rendered_depth = torch.sum(weights * pts_depth, -1)
 
-    return rendered_rgb, rendered_depth
+    return rendered_rgb, rendered_semantic, rendered_depth
 
 
 def get_angle_wrt_src_cams(c2ws, rays_pts, rays_dir_unit):
@@ -226,6 +228,6 @@ def render_rays(
     ## rendering sigma and RGB values
     rgb_sigma = renderer_net(embedded_angles, pts_feat, occ_masks)
 
-    rendered_rgb, rendered_depth = volume_rendering(rgb_sigma, pts_depth)
+    rendered_rgb, rendered_semantic, rendered_depth = volume_rendering(rgb_sigma, pts_depth)
 
-    return rendered_rgb, rendered_depth
+    return rendered_rgb, rendered_semantic, rendered_depth

@@ -223,7 +223,7 @@ class EncoderLayer(nn.Module):
 
 
 class Renderer(nn.Module):
-    def __init__(self, nb_samples_per_ray):
+    def __init__(self, nb_samples_per_ray, nb_class=0):
         super(Renderer, self).__init__()
 
         self.dim = 32
@@ -256,6 +256,10 @@ class Renderer(nn.Module):
         self.sigma_fc1 = nn.Linear(self.dim, self.dim)
         self.sigma_fc2 = nn.Linear(self.dim, self.dim // 2)
         self.sigma_fc3 = nn.Linear(self.dim // 2, 1)
+
+        self.semantic_fc1 = nn.Linear(self.dim, self.dim)
+        self.semantic_fc2 = nn.Linear(self.dim, self.dim // 2)
+        self.semantic_fc3 = nn.Linear(self.dim // 2, nb_class)
 
         self.rgb_fc1 = nn.Linear(self.dim + 9, self.dim)
         self.rgb_fc2 = nn.Linear(self.dim, self.dim // 2)
@@ -311,9 +315,13 @@ class Renderer(nn.Module):
         sigma_tokens = self.auto_enc(sigma_tokens)
         sigma_tokens = sigma_tokens.transpose(1, 2).reshape(N * S, 1, self.dim)
 
-        sigma_tokens = F.elu(self.sigma_fc1(sigma_tokens))
-        sigma_tokens = F.elu(self.sigma_fc2(sigma_tokens))
-        sigma = torch.relu(self.sigma_fc3(sigma_tokens[:, 0]))
+        sigma_tokens_ = F.elu(self.sigma_fc1(sigma_tokens))
+        sigma_tokens_ = F.elu(self.sigma_fc2(sigma_tokens_))
+        sigma = torch.relu(self.sigma_fc3(sigma_tokens_[:, 0]))
+
+        semantic_tokens_ = F.elu(self.semantic_fc1(sigma_tokens))
+        semantic_tokens_ = F.elu(self.semantic_fc2(semantic_tokens_))
+        semantic = torch.relu(self.semantic_fc3(semantic_tokens_[:, 0]))
 
         ## Concatenating positional encodings and predicting RGB weights
         rgb_tokens = torch.cat([tokens[:, :-1], viewdirs], dim=-1)
@@ -324,7 +332,7 @@ class Renderer(nn.Module):
 
         rgb = (colors * rgb_w).sum(1)
 
-        outputs = torch.cat([rgb, sigma], -1)
+        outputs = torch.cat([rgb, sigma, semantic], -1)
         outputs = outputs.reshape(N, S, -1)
 
         return outputs

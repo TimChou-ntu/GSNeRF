@@ -247,8 +247,8 @@ class KlevrDataset(Dataset):
                 # hard code to cuda
                 intrinsics_target=torch.tensor(intrinsics[i].astype(imgs.dtype)),
                 c2w_target=torch.tensor(c2ws[i].astype(imgs.dtype)),
-                # hard code to 1
-                train_batch_size=1,
+                # train=False with chunk=-1, will return all rays of the image
+                train=False,
             )
             near, far = calculate_near_and_far(rays_orig, rays_dir, bbox_min=[-3.1, -3.1, -0.1], bbox_max=[3.1, 3.1, 3.1])
             near = near.min().item()

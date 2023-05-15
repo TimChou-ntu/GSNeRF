@@ -37,6 +37,7 @@ def get_training_dataset(args, downsample=1.0):
             max_len=-1,
             downSample=downsample,
             nb_views=args.nb_views,
+            get_semantic=args.segmentation,
         )
         train_sampler = None
         return train_dataset, train_sampler
@@ -168,5 +169,6 @@ def get_validation_dataset(args, downsample=1.0):
             max_len=max_len,
             downSample=downsample,
             nb_views=args.nb_views,
+            get_semantic=args.segmentation,
         )
     return val_dataset
