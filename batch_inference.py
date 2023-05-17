@@ -12,8 +12,6 @@ import numpy as np
 import imageio
 import lpips
 from skimage.metrics import structural_similarity as ssim
-# from torchmetrics import JaccardIndex
-from utils.metrics import calculate_segmentation_metrics
 
 from model.geo_reasoner import CasMVSNet
 from model.self_attn_renderer import Renderer
@@ -30,7 +28,6 @@ from utils.utils import (
     abs_error,
     visualize_depth,
     seed_everything,
-    lable_color_map,
 )
 from utils.options import config_parser
 from data.get_datasets import (
@@ -49,19 +46,16 @@ class GeoNeRF(LightningModule):
         self.wr_cntr = 0
 
         self.depth_loss = SL1Loss()
-        self.semantic_loss = torch.nn.CrossEntropyLoss()
         self.learning_rate = hparams.lrate
 
         # Create geometry_reasoner and renderer models
         self.geo_reasoner = CasMVSNet(use_depth=hparams.use_depth).cuda()
         self.renderer = Renderer(
-            nb_samples_per_ray=hparams.nb_coarse + hparams.nb_fine,
-            nb_class=hparams.nb_class,
+            nb_samples_per_ray=hparams.nb_coarse + hparams.nb_fine
         ).cuda()
 
         self.eval_metric = [0.01, 0.05, 0.1]
-        # self.miou = JaccardIndex(task="multiclass",num_classes=hparams.nb_class, ignore_index=0)
-        self.miou = calculate_segmentation_metrics
+
         self.automatic_optimization = False
         self.save_hyperparameters()
 
@@ -152,7 +146,6 @@ class GeoNeRF(LightningModule):
             rays_pts_ndc,
             rays_dir,
             rays_gt_rgb,
-            rays_gt_semantic,
             rays_gt_depth,
             rays_pixs,
         ) = get_rays_pts(
@@ -169,15 +162,13 @@ class GeoNeRF(LightningModule):
             train=True,
             train_batch_size=self.hparams.batch_size,
             target_img=unpre_imgs[0, -1],
-            target_segmentation=batch["semantics"][0, -1], # (B, S, H, W)
             target_depth=batch["depths_h"][0, -1],
-            depth_map=depth_map['level_0'],
         )
         # debug
         # torch.save(rays_pts, f"../visualize_train_tmp_scale/rays_pts{batch_nb}.pt")
 
         ## Rendering
-        rendered_rgb, rendered_semantic, rendered_depth = render_rays(
+        rendered_rgb, rendered_depth = render_rays(
             c2ws=batch["c2ws"][0, :nb_views],
             rays_pts=rays_pts,
             rays_pts_ndc=rays_pts_ndc,
@@ -192,9 +183,7 @@ class GeoNeRF(LightningModule):
 
         # Supervising depth maps with either ground truth depth or self-supervision loss
         # This loss is only used in the generalizable model
-        # Not using right now
         if self.hparams.scene == "None":
-        # if False:
             ## if ground truth is available
             if isinstance(batch["depths"], dict):
                 loss = loss + 1 * self.depth_loss(depth_map, batch["depths"])
@@ -220,41 +209,39 @@ class GeoNeRF(LightningModule):
         depth_available = mask.sum() > 0
 
         ## Supervising ray depths
-        # if False:
-        ## This loss is only used in the generalizable model
-        if self.hparams.scene == "None":
-            loss = loss + 0.1 * self.depth_loss(rendered_depth, rays_gt_depth)
+        if depth_available:
+            ## This loss is only used in the generalizable model
+            if self.hparams.scene == "None":
+                loss = loss + 0.1 * self.depth_loss(rendered_depth, rays_gt_depth)
 
-        self.log(
-            f"train/acc_l_{self.eval_metric[0]}mm",
-            acc_threshold(
-                rendered_depth, rays_gt_depth, mask, self.eval_metric[0]
-            ).mean(),
-            prog_bar=False,
-        )
-        self.log(
-            f"train/acc_l_{self.eval_metric[1]}mm",
-            acc_threshold(
-                rendered_depth, rays_gt_depth, mask, self.eval_metric[1]
-            ).mean(),
-            prog_bar=False,
-        )
-        self.log(
-            f"train/acc_l_{self.eval_metric[2]}mm",
-            acc_threshold(
-                rendered_depth, rays_gt_depth, mask, self.eval_metric[2]
-            ).mean(),
-            prog_bar=False,
-        )
+            self.log(
+                f"train/acc_l_{self.eval_metric[0]}mm",
+                acc_threshold(
+                    rendered_depth, rays_gt_depth, mask, self.eval_metric[0]
+                ).mean(),
+                prog_bar=False,
+            )
+            self.log(
+                f"train/acc_l_{self.eval_metric[1]}mm",
+                acc_threshold(
+                    rendered_depth, rays_gt_depth, mask, self.eval_metric[1]
+                ).mean(),
+                prog_bar=False,
+            )
+            self.log(
+                f"train/acc_l_{self.eval_metric[2]}mm",
+                acc_threshold(
+                    rendered_depth, rays_gt_depth, mask, self.eval_metric[2]
+                ).mean(),
+                prog_bar=False,
+            )
 
-        abs_err = abs_error(rendered_depth, rays_gt_depth, mask).mean()
-        self.log("train/abs_err", abs_err, prog_bar=False)
+            abs_err = abs_error(rendered_depth, rays_gt_depth, mask).mean()
+            self.log("train/abs_err", abs_err, prog_bar=False)
 
         ## Reconstruction loss
-        if self.hparams.segmentation:
-            croos_entropy_loss = self.semantic_loss(rendered_semantic, rays_gt_semantic)
         mse_loss = img2mse(rendered_rgb, rays_gt_rgb)
-        loss = loss + mse_loss + 0.1*croos_entropy_loss
+        loss = mse_loss
         # loss = loss + mse_loss
         if torch.isnan(loss):
             print("Nan loss encountered, skipping batch...")
@@ -284,15 +271,15 @@ class GeoNeRF(LightningModule):
                 psnr = mse2psnr(mse_loss.detach())
                 self.log("train/PSNR", psnr.item(), prog_bar=False)
                 self.log("train/img_mse_loss", mse_loss.item(), prog_bar=False)
-                self.log("train/semantic_loss", croos_entropy_loss.item(), prog_bar=False)
 
             # Manual Optimization
             opt = self.optimizers()
             sch = self.lr_schedulers()
 
+            opt.zero_grad()
             self.manual_backward(loss)
             # clip gradients, not sure whether gradient explosion will happen
-            self.clip_gradients(opt, gradient_clip_val=2, gradient_clip_algorithm="value")
+            self.clip_gradients(opt, gradient_clip_val=0.5, gradient_clip_algorithm="norm")
 
             # Warming up the learning rate
             if self.trainer.global_step < self.hparams.warmup_steps:
@@ -306,7 +293,6 @@ class GeoNeRF(LightningModule):
             
             opt.step()
             sch.step()
-            opt.zero_grad()
 
             return {"loss": loss}
 
@@ -353,12 +339,11 @@ class GeoNeRF(LightningModule):
 
             unpre_imgs = self.unpreprocess(batch["images"])
 
-            rendered_rgb, rendered_semantic, rendered_depth = [], [], []
-            sum_ = []
+            rendered_rgb, rendered_depth = [], []
             for chunk_idx in range(
                 H * W // self.hparams.chunk + int(H * W % self.hparams.chunk > 0)
             ):
-                pts_depth, rays_pts, rays_pts_ndc, rays_dir, _, _, _, _ = get_rays_pts(
+                pts_depth, rays_pts, rays_pts_ndc, rays_dir, _, _, _ = get_rays_pts(
                     H,
                     W,
                     batch["c2ws"],
@@ -366,52 +351,32 @@ class GeoNeRF(LightningModule):
                     batch["intrinsics"],
                     batch["near_fars"],
                     depth_values,
-                    # self.hparams.nb_coarse,
-                    256,
+                    self.hparams.nb_coarse,
                     self.hparams.nb_fine,
                     nb_views=nb_views,
                     chunk=self.hparams.chunk,
                     chunk_idx=chunk_idx,
-                    # depth_map=depth_map['level_0'],
-                    depth_map=batch['depths_h'],
                 )
-                sum_.append(pts_depth)
                 # torch.save(rays_pts, f"../visualize_tmp_scale/rays_pts{chunk_idx}.pt")
                 # time.sleep(100)
                 ## Rendering
-                # rend_rgb, ren_semantic, rend_depth = render_rays(
-                #     c2ws=batch["c2ws"][0, :nb_views],
-                #     rays_pts=rays_pts,
-                #     rays_pts_ndc=rays_pts_ndc,
-                #     pts_depth=pts_depth,
-                #     rays_dir=rays_dir,
-                #     feats_vol=feats_vol,
-                #     feats_fpn=feats_fpn[:, :nb_views],
-                #     imgs=unpre_imgs[:, :nb_views],
-                #     depth_map_norm=depth_map_norm,
-                #     renderer_net=self.renderer,
-                # )
-                # rendered_rgb.append(rend_rgb)
-                # rendered_semantic.append(ren_semantic)
-                # rendered_depth.append(rend_depth)
-            depth_minmax = [
-                0.9 * batch["near_fars"].min().detach().cpu().numpy(),
-                1.1 * batch["near_fars"].max().detach().cpu().numpy(),
-            ]
-            novel_view_depth = torch.cat(sum_).reshape(H, W, -1)
-            novel_view_depth_color = visualize_depth(novel_view_depth, depth_minmax)[0]
-                
-            depth_vis = novel_view_depth_color.permute(1,2,0).numpy()
-
-            imageio.imwrite(
-                f"_novel_view_depth{batch_nb}.png",
-                (depth_vis * 255).astype("uint8"),
-            )
-            return 0
+                rend_rgb, rend_depth = render_rays(
+                    c2ws=batch["c2ws"][0, :nb_views],
+                    rays_pts=rays_pts,
+                    rays_pts_ndc=rays_pts_ndc,
+                    pts_depth=pts_depth,
+                    rays_dir=rays_dir,
+                    feats_vol=feats_vol,
+                    feats_fpn=feats_fpn[:, :nb_views],
+                    imgs=unpre_imgs[:, :nb_views],
+                    depth_map_norm=depth_map_norm,
+                    renderer_net=self.renderer,
+                )
+                rendered_rgb.append(rend_rgb)
+                rendered_depth.append(rend_depth)
             rendered_rgb = torch.clamp(
                 torch.cat(rendered_rgb).reshape(H, W, 3).permute(2, 0, 1), 0, 1
             )
-            rendered_semantic = torch.cat(rendered_semantic).reshape(H, W, -1).permute(2, 0, 1)
             rendered_depth = torch.cat(rendered_depth).reshape(H, W)
 
             ## Check if there is any ground truth depth information for the dataset
@@ -428,19 +393,7 @@ class GeoNeRF(LightningModule):
 
             unpre_imgs = unpre_imgs.cpu()
             rendered_rgb, rendered_depth = rendered_rgb.cpu(), rendered_depth.cpu()
-            rendered_semantic_pred = torch.argmax(rendered_semantic, dim=0).cpu()
-            pred_imgs = torch.from_numpy(np.array([lable_color_map[p] for p in rendered_semantic_pred])).permute(2, 0, 1)
             img_err_abs = (rendered_rgb_masked - img_gt_masked).abs()
-
-            ## Compute miou
-            if self.hparams.segmentation:
-                miou, miou_valid_class, total_accuracy, class_average_accuracy, ious = self.miou(
-                    true_labels=batch["semantics"][0, -1].reshape(-1),
-                    predicted_labels=rendered_semantic_pred.reshape(-1),
-                    number_classes=self.hparams.nb_class,
-                    ignore_label=0,
-                )
-                loss["val_miou"] = torch.tensor(miou_valid_class)
 
             depth_target = batch["depths_h"][0, -1].cpu()
             mask_target = depth_target > 0
@@ -459,6 +412,12 @@ class GeoNeRF(LightningModule):
                 rendered_rgb_masked[None] * 2 - 1, img_gt_masked[None] * 2 - 1
             ).item()  # Normalize to [-1,1]
 
+            depth_minmax = [
+                0.9 * batch["near_fars"].min().detach().cpu().numpy(),
+                1.1 * batch["near_fars"].max().detach().cpu().numpy(),
+            ]
+            rendered_depth_vis, _ = visualize_depth(rendered_depth, depth_minmax)
+
             if depth_available:
                 loss["val_abs_err"] = abs_error(
                     rendered_depth, depth_target, mask_target
@@ -473,130 +432,53 @@ class GeoNeRF(LightningModule):
                     rendered_depth, depth_target, mask_target, self.eval_metric[2]
                 ).sum()
                 loss["mask_sum"] = mask_target.float().sum()
-            
-            depth_minmax = [
-                0.9 * batch["near_fars"].min().detach().cpu().numpy(),
-                1.1 * batch["near_fars"].max().detach().cpu().numpy(),
-            ]
-            # make sure the folder exists
-            if self.hparams.eval:
-                folder = "evaluation_"
-            else:
-                folder = "prediction_"
-            os.makedirs(
-                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/{folder}/{self.global_step:08d}/",
-                exist_ok=True,
+
+            img_vis = (
+                torch.cat(
+                    (
+                        unpre_imgs[:, -1],
+                        torch.stack([rendered_rgb, img_err_abs * 5]),
+                        rendered_depth_vis[None],
+                    ),
+                    dim=0,
+                )
+                .clip(0, 1)
+                .permute(2, 0, 3, 1)
+                .reshape(H, -1, 3)
+                .numpy()
             )
 
-            # Visualize target comparison
-            if "target" in self.hparams.val_save_img_type:
-                rendered_depth_vis, _ = visualize_depth(rendered_depth, depth_minmax)
+            # os.makedirs(
+            #     f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/rendered_results/{self.global_step:08d}/",
+            #     exist_ok=True,
+            # )
+            # imageio.imwrite(
+            #     f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/rendered_results/{self.global_step:08d}/{self.wr_cntr:03d}.png",
+            #     (
+            #         rendered_rgb.detach().permute(1, 2, 0).clip(0.0, 1.0).cpu().numpy()
+            #         * 255
+            #     ).astype("uint8"),
+            # )
 
-                img_vis = (
-                    torch.cat(
-                        (
-                            unpre_imgs[:, -1],
-                            torch.stack([rendered_rgb, pred_imgs, img_err_abs * 5]),
-                            rendered_depth_vis[None],
-                        ),
-                        dim=0,
-                    )
-                    .clip(0, 1)
-                    .permute(2, 0, 3, 1)
-                    .reshape(H, -1, 3)
-                    .numpy()
-                )
+            os.makedirs(
+                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/prediction_/{self.global_step:08d}/",
+                exist_ok=True,
+            )
+            imageio.imwrite(
+                f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/prediction_/{self.global_step:08d}/{self.wr_cntr:02d}.png",
+                (img_vis * 255).astype("uint8"),
+            )
 
-
-                imageio.imwrite(
-                    f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/{folder}/{self.global_step:08d}/{self.wr_cntr:02d}.png",
-                    (img_vis * 255).astype("uint8"),
-                )
-            
-            if "depth" in self.hparams.val_save_img_type:
-                depth_map_vis = []
-                gt_depth_vis = []
-                
-                # all images (source and target)
-                for i in range(batch["depths_h"].shape[1]):
-                    gt_depth_vis.append(visualize_depth(batch["depths_h"][0, i], depth_minmax)[0])
-               
-                # only source image
-                for i in range(depth_map['level_0'].shape[1]):
-                    depth_map_vis.append(visualize_depth(depth_map['level_0'][0, i], depth_minmax)[0])
-                
-                depth_vis = (
-                    torch.cat(
-                        (
-                            torch.stack(gt_depth_vis),
-                        ),
-                        dim=0,
-                    )
-                    .clip(0, 1)
-                    .permute(2, 0, 3, 1)
-                    .reshape(H, -1, 3)
-                    .numpy()
-                )
-
-                imageio.imwrite(
-                    f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/{folder}/{self.global_step:08d}/depth_{self.wr_cntr:02d}.png",
-                    (depth_vis * 255).astype("uint8"),
-                )
-
-
-                depth_map_vis_ = (
-                    torch.cat(
-                        (
-                            torch.stack(depth_map_vis),
-                        ),
-                        dim=0,
-                    )
-                    .clip(0, 1)
-                    .permute(2, 0, 3, 1)
-                    .reshape(H, -1, 3)
-                    .numpy()
-                )
-
-                imageio.imwrite(
-                    f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/{folder}/{self.global_step:08d}/depthmap_{self.wr_cntr:02d}.png",
-                    (depth_map_vis_ * 255).astype("uint8"),
-                )
-
-            if "source" in self.hparams.val_save_img_type:
-                original_img_vis = []
-                for i in range(unpre_imgs.shape[1]):
-                    original_img_vis.append(unpre_imgs[0, i])
-                unpre_imgs_vis = (
-                    torch.cat(
-                        (
-                            torch.stack(original_img_vis),
-                        ),
-                        dim=0,
-                    )
-                    .clip(0, 1)
-                    .permute(2, 0, 3, 1)
-                    .reshape(H, -1, 3)
-                    .numpy()
-                )
-
-
-                imageio.imwrite(
-                    f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/prediction_/{self.global_step:08d}/source_{self.wr_cntr:02d}.png",
-                    (unpre_imgs_vis * 255).astype("uint8"),
-                )
-
+            print(f"Image {self.wr_cntr:02d} rendered.")
             self.wr_cntr += 1
         self.validation_step_outputs.append(loss)
         return loss
 
     def on_validation_epoch_end(self):
         # recount the number of rendered images
-        print(f"Image {self.wr_cntr:02d} rendered.")
         self.wr_cntr = 0
         outputs = self.validation_step_outputs
         mean_psnr = torch.stack([x["val_psnr"] for x in outputs]).mean()
-        if self.hparams.segmentation:
-            mean_miou = torch.stack([x["val_miou"] for x in outputs]).mean()
         mean_ssim = np.stack([x["val_ssim"] for x in outputs]).mean()
         mean_lpips = np.stack([x["val_lpips"] for x in outputs]).mean()
         mask_sum = torch.stack([x["mask_sum"] for x in outputs]).sum()
@@ -618,8 +500,6 @@ class GeoNeRF(LightningModule):
         self.log("val/PSNR", mean_psnr, prog_bar=False)
         self.log("val/SSIM", mean_ssim, prog_bar=False)
         self.log("val/LPIPS", mean_lpips, prog_bar=False)
-        if self.hparams.segmentation:
-            self.log("val/mIoU", mean_miou, prog_bar=False)
         if mask_sum > 0:
             self.log("val/d_loss_r", mean_d_loss_r, prog_bar=False)
             self.log("val/abs_err", mean_abs_err, prog_bar=False)
@@ -647,13 +527,11 @@ if __name__ == "__main__":
     geonerf = GeoNeRF(args)
 
     ## Checking to logdir to see if there is any checkpoint file to continue with
-    # comment out the following lines if you want to train from scratch
-    # ckpt_path = f"{args.logdir}/{args.dataset_name}/{args.expname}/ckpts"
-    # if os.path.isdir(ckpt_path) and len(os.listdir(ckpt_path)) > 0:
-    #     ckpt_file = os.path.join(ckpt_path, os.listdir(ckpt_path)[-1])
-    # else:
-    #     ckpt_file = None
-    ckpt_file = None
+    ckpt_path = f"{args.logdir}/{args.dataset_name}/{args.expname}/ckpts"
+    if os.path.isdir(ckpt_path) and len(os.listdir(ckpt_path)) > 0:
+        ckpt_file = os.path.join(ckpt_path, os.listdir(ckpt_path)[-1])
+    else:
+        ckpt_file = None
 
 
     ## Setting a callback to automatically save checkpoints
@@ -703,14 +581,13 @@ if __name__ == "__main__":
             load_ckpt(geonerf.renderer, ckpt_file, "renderer")
         elif not args.use_depth:  ## Generalizable
             ## Loading the pretrained weights from Cascade MVSNet
-            print("!!! NOT Loading pretrained weights from Cascade MVSNet!!!")
-            # print("!!!Loading pretrained weights from Cascade MVSNet!!!")
-            # torch.utils.model_zoo.load_url(
-            #     "https://github.com/kwea123/CasMVSNet_pl/releases/download/1.5/epoch.15.ckpt",
-            #     model_dir="pretrained_weights",
-            # )
-            # ckpt_file = "pretrained_weights/epoch.15.ckpt"
-            # load_ckpt(geonerf.geo_reasoner, ckpt_file, "model", strict=False)
+            print("!!!Loading pretrained weights from Cascade MVSNet!!!")
+            torch.utils.model_zoo.load_url(
+                "https://github.com/kwea123/CasMVSNet_pl/releases/download/1.5/epoch.15.ckpt",
+                model_dir="pretrained_weights",
+            )
+            ckpt_file = "pretrained_weights/epoch.15.ckpt"
+            load_ckpt(geonerf.geo_reasoner, ckpt_file, "model", strict=False)
 
         # geonerf = torch.compile(geonerf, mode="reduce-overhead")
 
@@ -724,7 +601,6 @@ if __name__ == "__main__":
                 ckpt_file = "pretrained_weights/pretrained_w_depth.ckpt"
             else:
                 ckpt_file = args.ckpt_path
-
         # load_ckpt(geonerf.geo_reasoner, ckpt_file, "geo_reasoner")
         # load_ckpt(geonerf.renderer, ckpt_file, "renderer")
 

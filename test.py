@@ -8,40 +8,41 @@ import imageio
 dataset = KlevrDataset(
     root_dir="/home/timothy/Desktop/2023Spring/GeoNeRF/data/data/nesf_data/klevr/",
     split="train",
-    nb_views=6
+    nb_views=6,
+    get_semantic=True,
     )
 
 data = dataset[0]
 print(data.keys())
-print(data["images"].shape)
-print(data["images"][0])
-img_vis = (
-    data["images"]
-    .clip(0, 1)
-    .transpose((0, 2, 3, 1))
-    # .reshape((data["images"].shape[-1], -1, 3))
-)
-img_vis = np.concatenate((img_vis[0], img_vis[1],img_vis[2], img_vis[3],img_vis[4], img_vis[5], img_vis[6]), axis=1)
-print(img_vis.shape)
+# print(data["images"].shape)
+# print(data["images"][0])
+# img_vis = (
+#     data["images"]
+#     .clip(0, 1)
+#     .transpose((0, 2, 3, 1))
+#     # .reshape((data["images"].shape[-1], -1, 3))
+# )
+# img_vis = np.concatenate((img_vis[0], img_vis[1],img_vis[2], img_vis[3],img_vis[4], img_vis[5], img_vis[6]), axis=1)
+# print(img_vis.shape)
 
-color = ['b','g','r','c','m','y','k','tab:blue','tab:orange','tab:green','tab:red','tab:purple','tab:brown','tab:pink']
+# color = ['b','g','r','c','m','y','k','tab:blue','tab:orange','tab:green','tab:red','tab:purple','tab:brown','tab:pink']
 
-fig = plt.figure(figsize=(8, 8))
-ax = fig.add_subplot(111, projection='3d')
-print(data['w2cs'].shape)
-for id in range(7):
-    print(id)
-    ray_points = data["w2cs"][int(id)]
-    print(id, ray_points.shape)
-    data_ = ray_points
-    x = data_[1, -1]
-    y = data_[0, -1]
-    z = data_[2, -1]
-    ax.scatter(x, y, z,s=100, c=color[id%14])
-ax.scatter(0, 0, 0,s=100, c='r')
-fig2 = plt.figure()
-imgplot = plt.imshow(img_vis)
-plt.show()
+# fig = plt.figure(figsize=(8, 8))
+# ax = fig.add_subplot(111, projection='3d')
+# print(data['w2cs'].shape)
+# for id in range(7):
+#     print(id)
+#     ray_points = data["w2cs"][int(id)]
+#     print(id, ray_points.shape)
+#     data_ = ray_points
+#     x = data_[1, -1]
+#     y = data_[0, -1]
+#     z = data_[2, -1]
+#     ax.scatter(x, y, z,s=100, c=color[id%14])
+# ax.scatter(0, 0, 0,s=100, c='r')
+# fig2 = plt.figure()
+# imgplot = plt.imshow(img_vis)
+# plt.show()
 
 # os.makedirs(
 #     f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/nan_batch/",

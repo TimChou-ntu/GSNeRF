@@ -142,7 +142,44 @@ class KlevrDataset(Dataset):
 
     def read_depth(self, filename, far_bound, noisy_factor=1.0):
         # read depth image, currently not using it
-        return
+        depth_h = Image.open(filename)
+        depth_wh = np.round(np.array(depth_h.size) * self.downSample * noisy_factor).astype(np.int32)
+            
+        # originally NeRF use Image.Resampling.LANCZOS, not sure if BICUBIC is better
+        depth_h = depth_h.resize(depth_wh, Image.BILINEAR)
+        
+        ## Exclude points beyond the bounds
+        depth_h_filter = np.array(depth_h)
+        depth_h_filter[depth_h_filter > far_bound * 0.95] = 0.0
+        
+        
+        depth = {}
+        for l in range(3):
+            depth_wh = np.round(np.array(depth_h.size) / (2**l)).astype(np.int32)
+            depth[f"level_{l}"] = np.array(depth_h.resize(depth_wh, Image.BILINEAR))
+            depth[f"level_{l}"][depth[f"level_{l}"] > far_bound * 0.95] = 0.0
+
+        if self.split == "train":
+            cutout = np.ones_like(depth[f"level_2"])
+            h0 = int(np.random.randint(0, high=cutout.shape[0] // 5, size=1))
+            h1 = int(
+                np.random.randint(
+                    4 * cutout.shape[0] // 5, high=cutout.shape[0], size=1
+                )
+            )
+            w0 = int(np.random.randint(0, high=cutout.shape[1] // 5, size=1))
+            w1 = int(
+                np.random.randint(
+                    4 * cutout.shape[1] // 5, high=cutout.shape[1], size=1
+                )
+            )
+            cutout[h0:h1, w0:w1] = 0
+            depth_aug = depth[f"level_2"] * cutout
+        else:
+            depth_aug = depth[f"level_2"].copy()
+
+        return depth, depth_h_filter, depth_aug
+
 
     def __len__(self):
         return len(self.metas) if self.max_len <= 0 else self.max_len
@@ -162,7 +199,8 @@ class KlevrDataset(Dataset):
         view_ids = src_ids + [ref_id]
         
         affine_mats, affine_mats_inv = [], []
-        imgs = []
+        imgs, depths_h, depths_aug = [], [], []
+        depths = {"level_0": [], "level_1": [], "level_2": []}
         semantics = []
         intrinsics, w2cs, c2ws = [], [], []
 
@@ -172,6 +210,8 @@ class KlevrDataset(Dataset):
         
         for vid in view_ids:
             img_filename = os.path.join(self.root_dir, self.scan_idx_to_name[scan_idx],f'rgba_{vid:05d}.png')
+            depth_filename = os.path.join(self.root_dir, self.scan_idx_to_name[scan_idx],f'depth_{vid:05d}.tiff')
+            
             img = Image.open(img_filename)
             img_wh = np.round(np.array(img.size)*self.downSample).astype(np.int32)
             
@@ -219,6 +259,15 @@ class KlevrDataset(Dataset):
 
             affine_mats.append(aff)
             affine_mats_inv.append(aff_inv)
+            # currently hardcode far bound to be 17
+            depth, depth_h, depth_aug = self.read_depth(depth_filename, far_bound=17, noisy_factor=1)
+
+            depths["level_0"].append(depth["level_0"])
+            depths["level_1"].append(depth["level_1"])
+            depths["level_2"].append(depth["level_2"])
+            depths_h.append(depth_h)
+            depths_aug.append(depth_aug)
+
 
         imgs = np.stack(imgs)
         semantics = np.stack(semantics)
@@ -227,6 +276,11 @@ class KlevrDataset(Dataset):
         intrinsics = np.stack(intrinsics)
         w2cs = np.stack(w2cs)
         c2ws = np.stack(c2ws)
+        depths_h, depths_aug = np.stack(depths_h), np.stack(depths_aug)
+        depths["level_0"] = np.stack(depths["level_0"])
+        depths["level_1"] = np.stack(depths["level_1"])
+        depths["level_2"] = np.stack(depths["level_2"])
+
 
         close_idxs = []
         for pose in c2ws[:-1]:
@@ -266,10 +320,10 @@ class KlevrDataset(Dataset):
         sample['affine_mats_inv'] = affine_mats_inv.astype(imgs.dtype)
         sample['closest_idxs'] = close_idxs
         # depth aug seems to be a must to give, but if set to None doesn't matter (the use_depth is False)
-        sample['depths_aug'] = np.zeros((imgs.shape[0], imgs.shape[2], imgs.shape[3]))
-        sample['depths_h'] = np.zeros((imgs.shape[0], imgs.shape[2], imgs.shape[3]))
+        sample['depths_aug'] = depths_aug
+        sample['depths_h'] = depths_h
         # depth should be a dict, but if set to None doesn't matter (the use_depth is False) (original code still use depth loss)
-        sample['depths'] = np.zeros((imgs.shape[0], imgs.shape[2], imgs.shape[3]))
+        sample['depths'] = depths
         # near_fars is now just using constant value
         sample['near_fars'] = np.array(self.near_fars).astype(imgs.dtype)
         return sample

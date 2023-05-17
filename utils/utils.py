@@ -246,7 +246,9 @@ def get_rays(
     mask=None,
 ):
     if train:
-        if mask is None:
+        # if mask is None:
+        # not using gt target depth map as mask
+        if True:
             xs, ys = (
                 torch.randint(0, W, (train_batch_size,)).float().to(intrinsics_target.device),
                 torch.randint(0, H, (train_batch_size,)).float().to(intrinsics_target.device),
@@ -299,6 +301,7 @@ def conver_to_ndc(ray_pts, w2c_ref, intrinsics_ref, W_H, depth_values):
     ray_pts = torch.matmul(ray_pts, R.t()) + T.reshape(1, 3)
 
     ray_pts_ndc = ray_pts @ intrinsics_ref.t()
+    pts_depth_source_view = ray_pts_ndc[:, 2:]
     ray_pts_ndc[:, :2] = ray_pts_ndc[:, :2] / (
         ray_pts_ndc[:, -1:] * W_H.reshape(1, 2)
     )  # normalize x,y to 0~1
@@ -321,8 +324,9 @@ def conver_to_ndc(ray_pts, w2c_ref, intrinsics_ref, W_H, depth_values):
     ray_pts_ndc[:, 2] = (ray_pts_ndc[:, 2] - near) / (far - near)  # normalize z to 0~1
 
     ray_pts_ndc = ray_pts_ndc.view(nb_rays, nb_samples, 3)
+    pts_depth_source_view = pts_depth_source_view.view(nb_rays, nb_samples)
 
-    return ray_pts_ndc
+    return ray_pts_ndc, pts_depth_source_view
 
 
 def get_sample_points(
@@ -338,7 +342,11 @@ def get_sample_points(
     depth_values,
     W_H,
     with_noise=False,
+    depth_map=None,
 ):
+    # This is the option for using source view depth map to sample points
+    source_depth_guided = True # to use original geonerf sampling set this falses
+
     device = rays_o.device
     nb_rays = rays_o.shape[0]
 
@@ -348,63 +356,117 @@ def get_sample_points(
         pts_depth = pts_depth.expand([nb_rays, nb_coarse])
         ray_pts = rays_o.unsqueeze(1) + pts_depth.unsqueeze(-1) * rays_d.unsqueeze(1)
 
-        ## Counting the number of source views for which the points are valid
-        valid_points = torch.zeros([nb_rays, nb_coarse]).to(device)
-        for idx in range(nb_views):
-            w2c_ref, intrinsic_ref = w2cs[0, idx], intrinsics[0, idx]
-            ray_pts_ndc = conver_to_ndc(
-                ray_pts,
-                w2c_ref,
-                intrinsic_ref,
-                W_H,
-                depth_values=depth_values[f"level_0"][:, idx],
-            )
-            valid_points += (
-                ((ray_pts_ndc >= 0) & (ray_pts_ndc <= 1)).sum(dim=-1) == 3
-            ).float()
-
-        ## Creating a distribution based on the counted values and sample more points
-        if nb_fine > 0:
-            point_distr = torch.distributions.categorical.Categorical(
-                logits=valid_points
-            )
-            t_vals = (
-                point_distr.sample([nb_fine]).t()
-                - torch.rand([nb_rays, nb_fine]).to(device)
-            ) / (nb_coarse - 1)
-            pts_depth_fine = near * (1.0 - t_vals) + far * (t_vals)
-
-            pts_depth = torch.cat([pts_depth, pts_depth_fine], dim=-1)
-            pts_depth, _ = torch.sort(pts_depth)
-
-        if with_noise:  ## Add noise to sample points during training
-            # get intervals between samples
-            mids = 0.5 * (pts_depth[..., 1:] + pts_depth[..., :-1])
-            upper = torch.cat([mids, pts_depth[..., -1:]], -1)
-            lower = torch.cat([pts_depth[..., :1], mids], -1)
-            # stratified samples in those intervals
-            t_rand = torch.rand(pts_depth.shape, device=device)
-            pts_depth = lower + (upper - lower) * t_rand
-
-        ray_pts = rays_o.unsqueeze(1) + pts_depth.unsqueeze(-1) * rays_d.unsqueeze(1)
-
-        ray_pts_ndc = {"level_0": [], "level_1": [], "level_2": []}
-        for idx in range(nb_views):
-            w2c_ref, intrinsic_ref = w2cs[0, idx], intrinsics[0, idx]
-            for l in range(3):
-                ray_pts_ndc[f"level_{l}"].append(
-                    conver_to_ndc(
-                        ray_pts,
-                        w2c_ref,
-                        intrinsic_ref,
-                        W_H,
-                        depth_values=depth_values[f"level_{l}"][:, idx],
-                    )
+        if source_depth_guided:
+            print("Using source depth map to sample points")
+            mean_distance = []
+            for idx in range(nb_views):
+                w2c_ref, intrinsic_ref = w2cs[0, idx], intrinsics[0, idx]
+                ray_pts_ndc, pts_depth_source_view = conver_to_ndc(
+                    ray_pts,
+                    w2c_ref,
+                    intrinsic_ref,
+                    W_H,
+                    depth_values=depth_values[f"level_0"][:, idx],
                 )
-        for l in range(3):
-            ray_pts_ndc[f"level_{l}"] = torch.stack(ray_pts_ndc[f"level_{l}"], dim=2)
 
-        return pts_depth, ray_pts, ray_pts_ndc
+                H, W = ray_pts_ndc.shape[-3:-1]
+                grid = ray_pts_ndc[..., :2].view(-1, H, W, 2) * 2 - 1.0  # [1 H W 2] (x,y)
+                depth = (
+                    F.grid_sample(
+                        depth_map[:,idx,None,:,:], grid, align_corners=True, mode="bilinear", padding_mode="zeros"
+                    )
+                    .permute(2, 3, 1, 0)
+                    .squeeze()
+                )
+                print(depth.shape)
+                print(pts_depth_source_view.shape)
+                # distance = torch.abs(pts_depth_source_view - depth)
+                distance = pts_depth_source_view - depth
+                print(distance.shape)
+                mean_distance.append(distance)
+                # import matplotlib.pyplot as plt
+                # distance = distance.cpu().numpy()
+                # for i in range(distance.shape[0]):
+                #     if (distance[i]>0).sum()<20:
+                #         continue
+                #     else:
+                #         y = [distance[i,j] for j in range(distance.shape[1])]
+                #         x = np.arange(distance.shape[1])
+                #         fig = plt.figure()
+                #         ax = plt.subplot(111)
+                #         ax.plot(x, y, label='$y = numbers')
+                #         plt.title('Legend inside')
+                #         ax.legend()
+                #         fig.savefig(f'plot{i}.png')
+            mean_distance = torch.stack(mean_distance, dim=0)
+            mean_distance = torch.mean(mean_distance, dim=0)
+
+            print("done")
+            # mean_distance, min_indice = torch.min(mean_distance, dim=-1)
+            mask = (mean_distance>0).int()
+            min_indice = torch.argmax(mask, dim=-1)
+            mask_ = min_indice == 0
+            min_indice[mask_] = 95
+            d_ = pts_depth[0, min_indice]
+            return d_, 0, 0
+
+        else:
+            ## Counting the number of source views for which the points are valid
+            valid_points = torch.zeros([nb_rays, nb_coarse]).to(device)
+            for idx in range(nb_views):
+                w2c_ref, intrinsic_ref = w2cs[0, idx], intrinsics[0, idx]
+                ray_pts_ndc, pts_depth_source_view = conver_to_ndc(
+                    ray_pts,
+                    w2c_ref,
+                    intrinsic_ref,
+                    W_H,
+                    depth_values=depth_values[f"level_0"][:, idx],
+                )
+                valid_points += (
+                    ((ray_pts_ndc >= 0) & (ray_pts_ndc <= 1)).sum(dim=-1) == 3
+                ).float()
+
+            ## Creating a distribution based on the counted values and sample more points
+            if nb_fine > 0:
+                point_distr = torch.distributions.categorical.Categorical(
+                    logits=valid_points
+                )
+                t_vals = (
+                    point_distr.sample([nb_fine]).t()
+                    - torch.rand([nb_rays, nb_fine]).to(device)
+                ) / (nb_coarse - 1)
+                pts_depth_fine = near * (1.0 - t_vals) + far * (t_vals)
+
+                pts_depth = torch.cat([pts_depth, pts_depth_fine], dim=-1)
+                pts_depth, _ = torch.sort(pts_depth)
+
+            if with_noise:  ## Add noise to sample points during training
+                # get intervals between samples
+                mids = 0.5 * (pts_depth[..., 1:] + pts_depth[..., :-1])
+                upper = torch.cat([mids, pts_depth[..., -1:]], -1)
+                lower = torch.cat([pts_depth[..., :1], mids], -1)
+                # stratified samples in those intervals
+                t_rand = torch.rand(pts_depth.shape, device=device)
+                pts_depth = lower + (upper - lower) * t_rand
+
+            ray_pts = rays_o.unsqueeze(1) + pts_depth.unsqueeze(-1) * rays_d.unsqueeze(1)
+
+            all_ray_pts_ndc = {"level_0": [], "level_1": [], "level_2": []}
+            for idx in range(nb_views):
+                w2c_ref, intrinsic_ref = w2cs[0, idx], intrinsics[0, idx]
+                for l in range(3):
+                        ray_pts_ndc, pts_depth_source_view = conver_to_ndc(
+                            ray_pts,
+                            w2c_ref,
+                            intrinsic_ref,
+                            W_H,
+                            depth_values=depth_values[f"level_{l}"][:, idx],
+                        )
+                        all_ray_pts_ndc[f"level_{l}"].append(ray_pts_ndc)
+            for l in range(3):
+                all_ray_pts_ndc[f"level_{l}"] = torch.stack(all_ray_pts_ndc[f"level_{l}"], dim=2)
+
+            return pts_depth, ray_pts, all_ray_pts_ndc
 
 
 def get_rays_pts(
@@ -425,7 +487,11 @@ def get_rays_pts(
     target_img=None,
     target_depth=None,
     target_segmentation=None,
+    depth_map=None,
 ):
+    '''
+    # TODO: Add documentation
+    '''
     if train:
         if target_depth.sum() > 0:
             depth_mask = target_depth > 0
@@ -487,6 +553,7 @@ def get_rays_pts(
         depth_values,
         W_H,
         with_noise=train,
+        depth_map=depth_map,
     )
 
     return (
@@ -520,9 +587,16 @@ def interpolate_3D(feats, pts_ndc):
 
 
 def interpolate_2D(feats, imgs, pts_ndc):
-    H, W = pts_ndc.shape[-3:-1]
-    grid = pts_ndc[..., :2].view(-1, H, W, 2) * 2 - 1.0  # [1 H W 2] (x,y)
-    features = (
+    '''
+    getting the features and images at the points / a image and feature
+    feats: (1,8,256,256)
+    imgs: (1,3,256,256)
+    pts_ndc: (4096,128,3)
+    return: (4096,128,8), (4096,128,3)
+    '''
+    H, W = pts_ndc.shape[-3:-1] 
+    grid = pts_ndc[..., :2].view(-1, H, W, 2) * 2 - 1.0  # [1 H W 2] (x,y) (1,4096,128,2)
+    features = ( 
         F.grid_sample(
             feats, grid, align_corners=True, mode="bilinear", padding_mode="border"
         )
@@ -537,8 +611,8 @@ def interpolate_2D(feats, imgs, pts_ndc):
         .squeeze()
     )
     with torch.no_grad():
-        in_mask = (grid > -1.0) * (grid < 1.0)
-        in_mask = (in_mask[..., 0] * in_mask[..., 1]).float().permute(1, 2, 0)
+        in_mask = (grid > -1.0) * (grid < 1.0) # (1,4096,128,2)
+        in_mask = (in_mask[..., 0] * in_mask[..., 1]).float().permute(1, 2, 0) # (4096,128,1)
 
     return features, images, in_mask
 
