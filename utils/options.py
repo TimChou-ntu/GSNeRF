@@ -60,7 +60,7 @@ def config_parser():
     parser.add_argument("--logdir", type=str, default="./logs/", help="Where to store ckpts and logs")
     parser.add_argument("--eval", action="store_true", help="Render and evaluate the test set")
     parser.add_argument("--use_depth", action="store_true", help="Use ground truth low-res depth maps in rendering process")
-    parser.add_argument("--seed", type=int, default=0, help="Random seed")
+    parser.add_argument("--seed", type=int, default=123, help="Random seed")
     # parser.add_argument("--val_save_img_type", type=str, default="target", choices=["target", "depth", "source"], help="Save target comparison images or depth maps or source images")
     parser.add_argument("--val_save_img_type", default=["target"], action="append", help="choices=[target, depth, source], Save target comparison images or depth maps or source images")
 

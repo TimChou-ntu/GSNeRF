@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
+import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning import LightningModule, Trainer, loggers
 from pytorch_lightning.loggers import WandbLogger
@@ -9,6 +10,7 @@ from pytorch_lightning.loggers import WandbLogger
 import os
 import time
 import numpy as np
+import sys
 import imageio
 import lpips
 from skimage.metrics import structural_similarity as ssim
@@ -354,7 +356,6 @@ class GeoNeRF(LightningModule):
             unpre_imgs = self.unpreprocess(batch["images"])
 
             rendered_rgb, rendered_semantic, rendered_depth = [], [], []
-            sum_ = []
             for chunk_idx in range(
                 H * W // self.hparams.chunk + int(H * W % self.hparams.chunk > 0)
             ):
@@ -366,8 +367,8 @@ class GeoNeRF(LightningModule):
                     batch["intrinsics"],
                     batch["near_fars"],
                     depth_values,
-                    # self.hparams.nb_coarse,
-                    256,
+                    self.hparams.nb_coarse,
+                    # 256,
                     self.hparams.nb_fine,
                     nb_views=nb_views,
                     chunk=self.hparams.chunk,
@@ -375,39 +376,24 @@ class GeoNeRF(LightningModule):
                     # depth_map=depth_map['level_0'],
                     depth_map=batch['depths_h'],
                 )
-                sum_.append(pts_depth)
-                # torch.save(rays_pts, f"../visualize_tmp_scale/rays_pts{chunk_idx}.pt")
-                # time.sleep(100)
-                ## Rendering
-                # rend_rgb, ren_semantic, rend_depth = render_rays(
-                #     c2ws=batch["c2ws"][0, :nb_views],
-                #     rays_pts=rays_pts,
-                #     rays_pts_ndc=rays_pts_ndc,
-                #     pts_depth=pts_depth,
-                #     rays_dir=rays_dir,
-                #     feats_vol=feats_vol,
-                #     feats_fpn=feats_fpn[:, :nb_views],
-                #     imgs=unpre_imgs[:, :nb_views],
-                #     depth_map_norm=depth_map_norm,
-                #     renderer_net=self.renderer,
-                # )
-                # rendered_rgb.append(rend_rgb)
-                # rendered_semantic.append(ren_semantic)
-                # rendered_depth.append(rend_depth)
-            depth_minmax = [
-                0.9 * batch["near_fars"].min().detach().cpu().numpy(),
-                1.1 * batch["near_fars"].max().detach().cpu().numpy(),
-            ]
-            novel_view_depth = torch.cat(sum_).reshape(H, W, -1)
-            novel_view_depth_color = visualize_depth(novel_view_depth, depth_minmax)[0]
-                
-            depth_vis = novel_view_depth_color.permute(1,2,0).numpy()
 
-            imageio.imwrite(
-                f"_novel_view_depth{batch_nb}.png",
-                (depth_vis * 255).astype("uint8"),
-            )
-            return 0
+                # Rendering
+                rend_rgb, ren_semantic, rend_depth = render_rays(
+                    c2ws=batch["c2ws"][0, :nb_views],
+                    rays_pts=rays_pts,
+                    rays_pts_ndc=rays_pts_ndc,
+                    pts_depth=pts_depth,
+                    rays_dir=rays_dir,
+                    feats_vol=feats_vol,
+                    feats_fpn=feats_fpn[:, :nb_views],
+                    imgs=unpre_imgs[:, :nb_views],
+                    depth_map_norm=depth_map_norm,
+                    renderer_net=self.renderer,
+                )
+                rendered_rgb.append(rend_rgb)
+                rendered_semantic.append(ren_semantic)
+                rendered_depth.append(rend_depth)
+
             rendered_rgb = torch.clamp(
                 torch.cat(rendered_rgb).reshape(H, W, 3).permute(2, 0, 1), 0, 1
             )
@@ -641,9 +627,15 @@ class GeoNeRF(LightningModule):
 
 if __name__ == "__main__":
     # torch.set_default_dtype(torch.float32)
+    np.set_printoptions(threshold=sys.maxsize)
     torch.set_float32_matmul_precision(precision="high")
     args = config_parser()
+
+    ## Setting seeds
+    print(f"Setting seeds to {args.seed}")
     seed_everything(args.seed)
+    pl.seed_everything(args.seed)
+    
     geonerf = GeoNeRF(args)
 
     ## Checking to logdir to see if there is any checkpoint file to continue with

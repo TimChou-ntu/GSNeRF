@@ -1,5 +1,5 @@
 ### INPUT
-expname = Generalizable_without_self_supervision_depth_NO_pretrain_MVS_weight_segmentation_correct
+expname = check_again
 logdir = ./logs_klevr/
 nb_views = 6
 

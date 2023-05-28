@@ -285,6 +285,8 @@ def get_rays(
     rays_dir = (
         dirs @ c2w_target[:3, :3].t()
     )  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
+    # the rays_dir should be normalized to 1, original code is wrong
+    rays_dir = rays_dir / torch.norm(rays_dir, dim=-1, keepdim=True)
     rays_orig = c2w_target[:3, -1].clone().reshape(1, 3).expand(rays_dir.shape[0], -1)
 
     rays_pixs = torch.stack((ys, xs))  # row col
@@ -301,6 +303,21 @@ def conver_to_ndc(ray_pts, w2c_ref, intrinsics_ref, W_H, depth_values):
     ray_pts = torch.matmul(ray_pts, R.t()) + T.reshape(1, 3)
 
     ray_pts_ndc = ray_pts @ intrinsics_ref.t()
+
+    # x = ray_pts_ndc.view(4096,96,3)[0,:, 0].cpu().numpy().reshape(-1)
+    # y = ray_pts_ndc.view(4096,96,3)[0,:, 1].cpu().numpy().reshape(-1)
+    # z = ray_pts_ndc.view(4096,96,3)[0,:, 2].cpu().numpy().reshape(-1)
+    # import matplotlib.pyplot as plt
+    # from mpl_toolkits.mplot3d import proj3d
+
+    # fig = plt.figure(figsize=(8, 8))
+    # # ax = fig.add_subplot(111, projection='3d')
+    # ax = fig.add_subplot(111)
+
+    # ax.scatter(x, y, z)
+    # fig.savefig(f'ray_pt.png')                        
+    # # plt.show()
+
     pts_depth_source_view = ray_pts_ndc[:, 2:]
     ray_pts_ndc[:, :2] = ray_pts_ndc[:, :2] / (
         ray_pts_ndc[:, -1:] * W_H.reshape(1, 2)
@@ -324,7 +341,8 @@ def conver_to_ndc(ray_pts, w2c_ref, intrinsics_ref, W_H, depth_values):
     ray_pts_ndc[:, 2] = (ray_pts_ndc[:, 2] - near) / (far - near)  # normalize z to 0~1
 
     ray_pts_ndc = ray_pts_ndc.view(nb_rays, nb_samples, 3)
-    pts_depth_source_view = pts_depth_source_view.view(nb_rays, nb_samples)
+    # pts_depth_source_view = pts_depth_source_view.view(nb_rays, nb_samples)
+    pts_depth_source_view = torch.abs(pts_depth_source_view.view(nb_rays, nb_samples))
 
     return ray_pts_ndc, pts_depth_source_view
 
@@ -345,7 +363,7 @@ def get_sample_points(
     depth_map=None,
 ):
     # This is the option for using source view depth map to sample points
-    source_depth_guided = True # to use original geonerf sampling set this falses
+    source_depth_guided = False # to use original geonerf sampling set this falses
 
     device = rays_o.device
     nb_rays = rays_o.shape[0]
@@ -357,58 +375,7 @@ def get_sample_points(
         ray_pts = rays_o.unsqueeze(1) + pts_depth.unsqueeze(-1) * rays_d.unsqueeze(1)
 
         if source_depth_guided:
-            print("Using source depth map to sample points")
-            mean_distance = []
-            for idx in range(nb_views):
-                w2c_ref, intrinsic_ref = w2cs[0, idx], intrinsics[0, idx]
-                ray_pts_ndc, pts_depth_source_view = conver_to_ndc(
-                    ray_pts,
-                    w2c_ref,
-                    intrinsic_ref,
-                    W_H,
-                    depth_values=depth_values[f"level_0"][:, idx],
-                )
-
-                H, W = ray_pts_ndc.shape[-3:-1]
-                grid = ray_pts_ndc[..., :2].view(-1, H, W, 2) * 2 - 1.0  # [1 H W 2] (x,y)
-                depth = (
-                    F.grid_sample(
-                        depth_map[:,idx,None,:,:], grid, align_corners=True, mode="bilinear", padding_mode="zeros"
-                    )
-                    .permute(2, 3, 1, 0)
-                    .squeeze()
-                )
-                print(depth.shape)
-                print(pts_depth_source_view.shape)
-                # distance = torch.abs(pts_depth_source_view - depth)
-                distance = pts_depth_source_view - depth
-                print(distance.shape)
-                mean_distance.append(distance)
-                # import matplotlib.pyplot as plt
-                # distance = distance.cpu().numpy()
-                # for i in range(distance.shape[0]):
-                #     if (distance[i]>0).sum()<20:
-                #         continue
-                #     else:
-                #         y = [distance[i,j] for j in range(distance.shape[1])]
-                #         x = np.arange(distance.shape[1])
-                #         fig = plt.figure()
-                #         ax = plt.subplot(111)
-                #         ax.plot(x, y, label='$y = numbers')
-                #         plt.title('Legend inside')
-                #         ax.legend()
-                #         fig.savefig(f'plot{i}.png')
-            mean_distance = torch.stack(mean_distance, dim=0)
-            mean_distance = torch.mean(mean_distance, dim=0)
-
-            print("done")
-            # mean_distance, min_indice = torch.min(mean_distance, dim=-1)
-            mask = (mean_distance>0).int()
-            min_indice = torch.argmax(mask, dim=-1)
-            mask_ = min_indice == 0
-            min_indice[mask_] = 95
-            d_ = pts_depth[0, min_indice]
-            return d_, 0, 0
+            raise NotImplementedError("source_depth_guided is not implemented yet")
 
         else:
             ## Counting the number of source views for which the points are valid
