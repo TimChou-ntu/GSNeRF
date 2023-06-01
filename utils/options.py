@@ -53,16 +53,18 @@ def config_parser():
     parser.add_argument("--chunk", type=int, default=4096, help="Number of rays rendered in parallel")
     parser.add_argument("--nb_coarse", type=int, default=96, help="Number of coarse samples per ray")
     parser.add_argument("--nb_fine", type=int, default=32, help="Number of additional fine samples per ray",)
+    # parser.add_argument("--nb_coarse", type=int, default=48, help="Number of coarse samples per ray")
+    # parser.add_argument("--nb_fine", type=int, default=16, help="Number of additional fine samples per ray",)
 
     # Other options
     parser.add_argument("--expname", type=str, help="Experiment name")
-    parser.add_argument("--logger", type=str, default="tensorboard", choices=["wandb", "tensorboard", "none"])
+    parser.add_argument("--logger", type=str, default="wandb", choices=["wandb", "tensorboard", "none"])
     parser.add_argument("--logdir", type=str, default="./logs/", help="Where to store ckpts and logs")
     parser.add_argument("--eval", action="store_true", help="Render and evaluate the test set")
     parser.add_argument("--use_depth", action="store_true", help="Use ground truth low-res depth maps in rendering process")
     parser.add_argument("--seed", type=int, default=123, help="Random seed")
-    # parser.add_argument("--val_save_img_type", type=str, default="target", choices=["target", "depth", "source"], help="Save target comparison images or depth maps or source images")
     parser.add_argument("--val_save_img_type", default=["target"], action="append", help="choices=[target, depth, source], Save target comparison images or depth maps or source images")
+    parser.add_argument("--target_depth_estimation", action="store_true", help="Use target depth estimation in rendering process")
 
     # resume options
     parser.add_argument("--ckpt_path", type=str, default=None, help="Path to a checkpoint to resume training")

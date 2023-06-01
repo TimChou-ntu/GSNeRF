@@ -285,8 +285,8 @@ def get_rays(
     rays_dir = (
         dirs @ c2w_target[:3, :3].t()
     )  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
-    # the rays_dir should be normalized to 1, original code is wrong
-    rays_dir = rays_dir / torch.norm(rays_dir, dim=-1, keepdim=True)
+    # the rays_dir might need to be normalized to 1
+    # rays_dir = rays_dir / torch.norm(rays_dir, dim=-1, keepdim=True)
     rays_orig = c2w_target[:3, -1].clone().reshape(1, 3).expand(rays_dir.shape[0], -1)
 
     rays_pixs = torch.stack((ys, xs))  # row col
@@ -304,21 +304,7 @@ def conver_to_ndc(ray_pts, w2c_ref, intrinsics_ref, W_H, depth_values):
 
     ray_pts_ndc = ray_pts @ intrinsics_ref.t()
 
-    # x = ray_pts_ndc.view(4096,96,3)[0,:, 0].cpu().numpy().reshape(-1)
-    # y = ray_pts_ndc.view(4096,96,3)[0,:, 1].cpu().numpy().reshape(-1)
-    # z = ray_pts_ndc.view(4096,96,3)[0,:, 2].cpu().numpy().reshape(-1)
-    # import matplotlib.pyplot as plt
-    # from mpl_toolkits.mplot3d import proj3d
-
-    # fig = plt.figure(figsize=(8, 8))
-    # # ax = fig.add_subplot(111, projection='3d')
-    # ax = fig.add_subplot(111)
-
-    # ax.scatter(x, y, z)
-    # fig.savefig(f'ray_pt.png')                        
-    # # plt.show()
-
-    pts_depth_source_view = ray_pts_ndc[:, 2:]
+    # pts_depth_source_view = ray_pts_ndc[:, 2:]
     ray_pts_ndc[:, :2] = ray_pts_ndc[:, :2] / (
         ray_pts_ndc[:, -1:] * W_H.reshape(1, 2)
     )  # normalize x,y to 0~1
@@ -342,9 +328,10 @@ def conver_to_ndc(ray_pts, w2c_ref, intrinsics_ref, W_H, depth_values):
 
     ray_pts_ndc = ray_pts_ndc.view(nb_rays, nb_samples, 3)
     # pts_depth_source_view = pts_depth_source_view.view(nb_rays, nb_samples)
-    pts_depth_source_view = torch.abs(pts_depth_source_view.view(nb_rays, nb_samples))
+    # pts_depth_source_view = torch.abs(pts_depth_source_view.view(nb_rays, nb_samples))
 
-    return ray_pts_ndc, pts_depth_source_view
+    # return ray_pts_ndc, pts_depth_source_view
+    return ray_pts_ndc
 
 
 def get_sample_points(
@@ -360,29 +347,68 @@ def get_sample_points(
     depth_values,
     W_H,
     with_noise=False,
-    depth_map=None,
+    rays_depth=None,
 ):
-    # This is the option for using source view depth map to sample points
-    source_depth_guided = False # to use original geonerf sampling set this falses
+    # This is the option for using target depth to sample points, 
+    # to use original geonerf sampling set this falses
+    if rays_depth is not None:
+        target_depth_guidance = True  
+    else:
+        target_depth_guidance = False
 
     device = rays_o.device
     nb_rays = rays_o.shape[0]
 
     with torch.no_grad():
-        t_vals = torch.linspace(0.0, 1.0, steps=nb_coarse).view(1, nb_coarse).to(device)
-        pts_depth = near * (1.0 - t_vals) + far * (t_vals)
-        pts_depth = pts_depth.expand([nb_rays, nb_coarse])
-        ray_pts = rays_o.unsqueeze(1) + pts_depth.unsqueeze(-1) * rays_d.unsqueeze(1)
 
-        if source_depth_guided:
-            raise NotImplementedError("source_depth_guided is not implemented yet")
+        if target_depth_guidance:
+            depth_cand = []
+            N_rays = rays_o.shape[0]
+            # N_samples = nb_coarse + nb_fine
+            t_vals = torch.linspace(0.0, 1.0, steps=nb_coarse).view(nb_coarse).to(device)
+            pts_depth = near * (1.0 - t_vals) + far * (t_vals)
+            for element in rays_depth:
+                element = element.repeat(nb_fine)
+                # std = (torch.min(torch.abs(far-element),torch.abs(element-near)))/3
+                # if (std <= 0).sum() > 0:
+                #     print("non zero or negative std value detected")
+                # currently hard coded std value to 0.5, somehow cannot be set as above
+                x = torch.normal(mean=element,std=0.5)
+                x = torch.cat([pts_depth, x])
+                x1,_ = torch.sort(x)
+                # This is the mean point of the ray, the predicted depth, so at the end of the for loop iteration, it will have 1+N_samples elements
+                depth_cand.append(torch.cat([element[0:1], torch.clamp(x1,min=near,max=far)]))
+
+            # pts_depth: (N_rays, 1+N_samples)
+            pts_depth=torch.stack(depth_cand)
+
+            ##### RC-MVSNet use this, but not sure why. Comment it out for now
+            # half_N_rays = N_rays//2 
+            # t_vals = torch.linspace(0., 1., steps=N_samples).view(1,N_samples).to(device)
+            # depth_candidate_uniform = near * (1. - t_vals) + far * (t_vals)
+            # depth_candidate_uniform = depth_candidate_uniform.expand([half_N_rays, N_samples])
+
+            # # get intervals between samples
+            # mids = .5 * (depth_candidate_uniform[..., 1:] + depth_candidate_uniform[..., :-1])
+            # upper = torch.cat([mids, depth_candidate_uniform[..., -1:]], -1)
+            # lower = torch.cat([depth_candidate_uniform[..., :1], mids], -1)
+            # # stratified samples in those intervals
+            # t_rand = torch.rand(depth_candidate_uniform.shape, device=device)
+            # depth_candidate_uniform = lower + (upper - lower) * t_rand
+            # pts_depth[half_N_rays:,:] = depth_candidate_uniform
+            ray_pts = rays_o.unsqueeze(1) + pts_depth.unsqueeze(-1) * rays_d.unsqueeze(1)   #  [ray_samples 1+N_samples 3 ]
 
         else:
             ## Counting the number of source views for which the points are valid
+            t_vals = torch.linspace(0.0, 1.0, steps=nb_coarse).view(1, nb_coarse).to(device)
+            pts_depth = near * (1.0 - t_vals) + far * (t_vals)
+            pts_depth = pts_depth.expand([nb_rays, nb_coarse])
+            ray_pts = rays_o.unsqueeze(1) + pts_depth.unsqueeze(-1) * rays_d.unsqueeze(1)
+            
             valid_points = torch.zeros([nb_rays, nb_coarse]).to(device)
             for idx in range(nb_views):
                 w2c_ref, intrinsic_ref = w2cs[0, idx], intrinsics[0, idx]
-                ray_pts_ndc, pts_depth_source_view = conver_to_ndc(
+                ray_pts_ndc = conver_to_ndc(
                     ray_pts,
                     w2c_ref,
                     intrinsic_ref,
@@ -418,22 +444,25 @@ def get_sample_points(
 
             ray_pts = rays_o.unsqueeze(1) + pts_depth.unsqueeze(-1) * rays_d.unsqueeze(1)
 
-            all_ray_pts_ndc = {"level_0": [], "level_1": [], "level_2": []}
-            for idx in range(nb_views):
-                w2c_ref, intrinsic_ref = w2cs[0, idx], intrinsics[0, idx]
-                for l in range(3):
-                        ray_pts_ndc, pts_depth_source_view = conver_to_ndc(
-                            ray_pts,
-                            w2c_ref,
-                            intrinsic_ref,
-                            W_H,
-                            depth_values=depth_values[f"level_{l}"][:, idx],
-                        )
-                        all_ray_pts_ndc[f"level_{l}"].append(ray_pts_ndc)
+        middle_ray_pts_ndc = {"level_0": [], "level_1": [], "level_2": []}
+        all_ray_pts_ndc = {"level_0": [], "level_1": [], "level_2": []}
+        for idx in range(nb_views):
+            w2c_ref, intrinsic_ref = w2cs[0, idx], intrinsics[0, idx]
             for l in range(3):
-                all_ray_pts_ndc[f"level_{l}"] = torch.stack(all_ray_pts_ndc[f"level_{l}"], dim=2)
+                    ray_pts_ndc = conver_to_ndc(
+                        ray_pts,
+                        w2c_ref,
+                        intrinsic_ref,
+                        W_H,
+                        depth_values=depth_values[f"level_{l}"][:, idx],
+                    )
+                    middle_ray_pts_ndc[f"level_{l}"].append(ray_pts_ndc[:,:1])
+                    all_ray_pts_ndc[f"level_{l}"].append(ray_pts_ndc[:,1:])
+        for l in range(3):
+            middle_ray_pts_ndc[f"level_{l}"] = torch.stack(middle_ray_pts_ndc[f"level_{l}"], dim=2)
+            all_ray_pts_ndc[f"level_{l}"] = torch.stack(all_ray_pts_ndc[f"level_{l}"], dim=2)
 
-            return pts_depth, ray_pts, all_ray_pts_ndc
+        return pts_depth[:,1:], ray_pts[:,1:], all_ray_pts_ndc, pts_depth[:,:1], ray_pts[:,:1], middle_ray_pts_ndc
 
 
 def get_rays_pts(
@@ -479,9 +508,16 @@ def get_rays_pts(
         mask=depth_mask,
     )
 
+    rays_pixs_int = rays_pixs.long()
+
+    ## Extracting estimated depth of target view
+    if depth_map is not None:
+        rays_depth = depth_map[rays_pixs_int[0], rays_pixs_int[1]]
+    else:
+        rays_depth = None
+
     ## Extracting ground truth color and depth of target view
     if train:
-        rays_pixs_int = rays_pixs.long()
         rays_gt_rgb = target_img[:, rays_pixs_int[0], rays_pixs_int[1]].permute(1, 0)
         if target_segmentation is not None:
             rays_gt_semantic = target_segmentation[rays_pixs_int[0], rays_pixs_int[1]]
@@ -507,7 +543,7 @@ def get_rays_pts(
     
     # travel along the rays
     W_H = torch.tensor([W - 1, H - 1]).to(rays_orig.device)
-    pts_depth, ray_pts, ray_pts_ndc = get_sample_points(
+    pts_depth, ray_pts, ray_pts_ndc, middle_pts_depth, middle_ray_pts, middle_ray_pts_ndc = get_sample_points(
         nb_coarse,
         nb_fine,
         near,
@@ -520,10 +556,13 @@ def get_rays_pts(
         depth_values,
         W_H,
         with_noise=train,
-        depth_map=depth_map,
+        rays_depth=rays_depth,
     )
 
     return (
+        middle_pts_depth,
+        middle_ray_pts,
+        middle_ray_pts_ndc,
         pts_depth,
         ray_pts,
         ray_pts_ndc,

@@ -1,3 +1,13 @@
+To train:
+python run_geo_nerf.py --config configs/config_general_klevr.txt --segmentation --logger wandb --val_save_img_type depth --target_depth_estimation
+
+To validation:
+python run_geo_nerf.py --config configs/config_general_klevr.txt --segmentation --logger none --val_save_img_type depth --target_depth_estimation --ckpt_path /home/timothy/Desktop/2023Spring/generalized_nerf/logs_klevr/klevr/0531_architecture_memory_corrected_5/ckpts/ckpt_step-049009.ckpt --eval
+
+
+
+
+
 > # [CVPR 2022] GeoNeRF: Generalizing NeRF with Geometry Priors <br>
 > Mohammad Mahdi Johari, Yann Lepoittevin, François Fleuret <br>
 > [Project Page](https://www.idiap.ch/paper/geonerf/) | [Paper](https://arxiv.org/abs/2111.13539)

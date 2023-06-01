@@ -118,13 +118,14 @@ def sigma2weights(sigma):
 def volume_rendering(rgb_sigma, pts_depth):
     rgb = rgb_sigma[..., :3]
     weights = sigma2weights(rgb_sigma[..., 3])
-    semantic = rgb_sigma[..., 4:]
+    # semantic = rgb_sigma[..., 4:]
 
     rendered_rgb = torch.sum(weights[..., None] * rgb, -2)
-    rendered_semantic = torch.sum(weights[..., None] * semantic, -2)
+    # rendered_semantic = torch.sum(weights[..., None] * semantic, -2)
     rendered_depth = torch.sum(weights * pts_depth, -1)
 
-    return rendered_rgb, rendered_semantic, rendered_depth
+    # return rendered_rgb, rendered_semantic, rendered_depth
+    return rendered_rgb, rendered_depth
 
 
 def get_angle_wrt_src_cams(c2ws, rays_pts, rays_dir_unit):
@@ -159,6 +160,9 @@ def interpolate_pts_feats(imgs, feats_fpn, feats_vol, rays_pts_ndc):
         ray_feats_fpn, ray_colors, ray_masks = interpolate_2D(
             feats_fpn[:, i], imgs[:, i], rays_pts_ndc[f"level_0"][:, :, i]
         )
+        # When using only one point per ray, all features except ray masks are 2D (N_rays, C), while ray masks are 3D (N_rays, C, 1), so we need to squeeze it
+        if ray_colors.dim() == 2 and ray_masks.dim() == 3:
+            ray_masks = ray_masks.squeeze(-1)
 
         interpolated_feats.append(
             torch.cat(
@@ -211,6 +215,10 @@ def render_rays(
     imgs,
     depth_map_norm,
     renderer_net,
+    middle_ray_pts, 
+    middle_pts_depth, 
+    middle_ray_pts_ndc,
+    semantic_net=None,
 ):
     ## The angles between the ray and source camera vectors
     rays_dir_unit = rays_dir / torch.norm(rays_dir, dim=-1, keepdim=True)
@@ -219,15 +227,27 @@ def render_rays(
     ## Positional encoding
     embedded_angles = get_embedder()(angles)
 
-    ## Interpolate all features for sample points
+    ## Interpolate all features for sample points (N_rays, N_samples, source_view_num, C)
     pts_feat = interpolate_pts_feats(imgs, feats_fpn, feats_vol, rays_pts_ndc)
 
-    ## Getting Occlusion Masks based on predicted depths
+    ## Getting Occlusion Masks based on predicted depths (N_rays, N_samples, source_view_num, 1)
     occ_masks = get_occ_masks(depth_map_norm, rays_pts_ndc)
 
     ## rendering sigma and RGB values
     rgb_sigma = renderer_net(embedded_angles, pts_feat, occ_masks)
 
-    rendered_rgb, rendered_semantic, rendered_depth = volume_rendering(rgb_sigma, pts_depth)
+    rendered_rgb, rendered_depth = volume_rendering(rgb_sigma, pts_depth)
+
+    ## Interpolate all features for middle points, for semantic segmentation, originally (N_rays, C, source_view_num), transpose to (N_rays, source_view_num, C)
+    semantic_pts_feat = interpolate_pts_feats(imgs, feats_fpn, feats_vol, middle_ray_pts_ndc).transpose(1, 2)
+
+    ## Getting Occlusion Masks based on predicted depths, (N_rays, 1, source_view_num, 1)
+    semantic_occ_masks = get_occ_masks(depth_map_norm, middle_ray_pts_ndc)
+
+    ### Don't need rendering, because only one point per ray
+    rendered_semantic = semantic_net(semantic_pts_feat, semantic_occ_masks)
+
+    if torch.isnan(rendered_semantic).sum() > 0:
+        print("NaN in rendered_semantic")
 
     return rendered_rgb, rendered_semantic, rendered_depth

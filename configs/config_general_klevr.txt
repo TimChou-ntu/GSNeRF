@@ -1,5 +1,5 @@
 ### INPUT
-expname = check_again
+expname = 0601_uniform_depth_guided_bilateral_sampling_grid_3
 logdir = ./logs_klevr/
 nb_views = 6
 

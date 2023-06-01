@@ -223,7 +223,7 @@ class EncoderLayer(nn.Module):
 
 
 class Renderer(nn.Module):
-    def __init__(self, nb_samples_per_ray, nb_class=0):
+    def __init__(self, nb_samples_per_ray):
         super(Renderer, self).__init__()
 
         self.dim = 32
@@ -257,9 +257,9 @@ class Renderer(nn.Module):
         self.sigma_fc2 = nn.Linear(self.dim, self.dim // 2)
         self.sigma_fc3 = nn.Linear(self.dim // 2, 1)
 
-        self.semantic_fc1 = nn.Linear(self.dim, self.dim)
-        self.semantic_fc2 = nn.Linear(self.dim, self.dim // 2)
-        self.semantic_fc3 = nn.Linear(self.dim // 2, nb_class)
+        # self.semantic_fc1 = nn.Linear(self.dim, self.dim)
+        # self.semantic_fc2 = nn.Linear(self.dim, self.dim // 2)
+        # self.semantic_fc3 = nn.Linear(self.dim // 2, nb_class)
 
         self.rgb_fc1 = nn.Linear(self.dim + 9, self.dim)
         self.rgb_fc2 = nn.Linear(self.dim, self.dim // 2)
@@ -319,9 +319,9 @@ class Renderer(nn.Module):
         sigma_tokens_ = F.elu(self.sigma_fc2(sigma_tokens_))
         sigma = torch.relu(self.sigma_fc3(sigma_tokens_[:, 0]))
 
-        semantic_tokens_ = F.elu(self.semantic_fc1(sigma_tokens))
-        semantic_tokens_ = F.elu(self.semantic_fc2(semantic_tokens_))
-        semantic = torch.relu(self.semantic_fc3(semantic_tokens_[:, 0]))
+        # semantic_tokens_ = F.elu(self.semantic_fc1(sigma_tokens))
+        # semantic_tokens_ = F.elu(self.semantic_fc2(semantic_tokens_))
+        # semantic = torch.relu(self.semantic_fc3(semantic_tokens_[:, 0]))
 
         ## Concatenating positional encodings and predicting RGB weights
         rgb_tokens = torch.cat([tokens[:, :-1], viewdirs], dim=-1)
@@ -332,7 +332,78 @@ class Renderer(nn.Module):
 
         rgb = (colors * rgb_w).sum(1)
 
-        outputs = torch.cat([rgb, sigma, semantic], -1)
+        # outputs = torch.cat([rgb, sigma, semantic], -1)
+        outputs = torch.cat([rgb, sigma], -1)
         outputs = outputs.reshape(N, S, -1)
 
         return outputs
+
+
+class Semantic_predictor(nn.Module):
+    def __init__(self, nb_view=6, nb_class=0):
+        super(Semantic_predictor, self).__init__()
+
+        self.dim = 32
+        self.attn_token_gen = nn.Linear(24 + 1 + 8, self.dim)
+        self.semantic_dim = self.dim * nb_view
+
+        # Self-Attention Settings, This attention is cross-view attention for a point, which represent a pixel in target view
+        d_inner = self.dim
+        n_head = 4
+        d_k = self.dim // n_head
+        d_v = self.dim // n_head
+        num_layers = 4
+        self.attn_layers = nn.ModuleList(
+            [
+                EncoderLayer(self.dim, d_inner, n_head, d_k, d_v)
+                for i in range(num_layers)
+            ]
+        )
+        self.semantic_fc1 = nn.Linear(self.semantic_dim, self.semantic_dim)
+        self.semantic_fc2 = nn.Linear(self.semantic_dim, self.semantic_dim // 2)
+        self.semantic_fc3 = nn.Linear(self.semantic_dim // 2, nb_class)
+
+    def forward(self, feat, occ_masks):
+        if feat.dim() == 3:
+            feat = feat.unsqueeze(1)
+        if occ_masks.dim() == 3:
+            occ_masks = occ_masks.unsqueeze(1)
+        N, S, V, C = feat.shape # (num_rays, num_samples, num_views, feat_dim), S should be 1 here
+
+        feat = feat.view(-1, *feat.shape[2:]) # (num_rays * num_samples, num_views, feat_dim)
+        v_feat = feat[..., :24]
+        s_feat = feat[..., 24 : 24 + 8]
+        colors = feat[..., 24 + 8 : -1]
+        vis_mask = feat[..., -1:].detach()
+
+        occ_masks = occ_masks.view(-1, *occ_masks.shape[2:])
+
+        tokens = F.elu(
+            self.attn_token_gen(torch.cat([v_feat, vis_mask, s_feat], dim=-1))
+        )
+
+        ## If a point is not visible by any source view, force its masks to enabled
+        ## Not sure here
+        vis_mask = vis_mask.masked_fill(vis_mask.sum(dim=1, keepdims=True) == 0, 1)
+
+        ## Taking occ_masks into account, but remembering if there were any visibility before that
+        # mask_cloned = vis_mask.clone()
+        # vis_mask *= occ_masks
+        # vis_mask = vis_mask.masked_fill(vis_mask.sum(dim=1, keepdims=True) == 1, 1)
+        # masks = vis_mask * mask_cloned
+
+        ## Performing self-attention on source view features, 
+        for layer in self.attn_layers:
+            # tokens, _ = layer(tokens, masks)
+            tokens, _ = layer(tokens, vis_mask)
+
+        ## Predicting semantic with MLP
+        ## tokens shape: (N*S, V, dim), S = 1
+        tokens = tokens.reshape(N, V*self.dim)
+        semantic_tokens_ = F.elu(self.semantic_fc1(tokens))
+        semantic_tokens_ = F.elu(self.semantic_fc2(semantic_tokens_))
+        semantic_tokens_ = torch.relu(self.semantic_fc3(semantic_tokens_))
+
+        semantic = semantic_tokens_.reshape(N, S, -1)
+
+        return semantic
