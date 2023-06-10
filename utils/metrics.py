@@ -7,7 +7,7 @@ def nanmean(data, **args):
     # In np.ma.masked_array(data, np.isnan(data), elements of data == np.nan is invalid and will be ingorned during computation of np.mean()
 
 
-def calculate_segmentation_metrics(true_labels, predicted_labels, number_classes, ignore_label):
+def calculate_segmentation_metrics(true_labels, predicted_labels, number_classes, ignore_label=-1):
     '''
     return:
         miou: the miou of all classes (without nan classes / not existing classes)

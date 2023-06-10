@@ -42,6 +42,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
+from model.UNet import UNet
 from utils.utils import homo_warp
 from inplace_abn import InPlaceABN
 
@@ -235,7 +236,7 @@ class CostRegNet(nn.Module):
 
 
 class CasMVSNet(nn.Module):
-    def __init__(self, num_groups=8, norm_act=InPlaceABN, levels=3, use_depth=False):
+    def __init__(self, num_groups=8, norm_act=InPlaceABN, levels=3, use_depth=False, nb_class=1):
         super(CasMVSNet, self).__init__()
         self.levels = levels  # 3 depth levels
         self.n_depths = [8, 32, 48]
@@ -243,7 +244,9 @@ class CasMVSNet(nn.Module):
         self.use_depth = use_depth
 
         self.G = num_groups  # number of groups in groupwise correlation
-        self.feature = FeatureNet()
+        # self.feature = FeatureNet()
+        # change to UNet
+        self.feature = UNet(3,nb_class)
 
         for l in range(self.levels):
             if l == self.levels - 1 and self.use_depth:
@@ -398,6 +401,7 @@ class CasMVSNet(nn.Module):
             imgs.reshape(B * V, 3, H, W)
         )  # (B*V, 8, H, W), (B*V, 16, H//2, W//2), (B*V, 32, H//4, W//4)
         feats_fpn = feats[f"level_0"].reshape(B, V, *feats[f"level_0"].shape[1:])
+        semantic_feats = feats[f'logits'].reshape(B, V, *feats[f'logits'].shape[1:])
 
         feats_vol = {"level_0": [], "level_1": [], "level_2": []}
         depth_map = {"level_0": [], "level_1": [], "level_2": []}
@@ -437,4 +441,4 @@ class CasMVSNet(nn.Module):
             depth_map[f"level_{l}"] = torch.cat(depth_map[f"level_{l}"], dim=1)
             depth_values[f"level_{l}"] = torch.stack(depth_values[f"level_{l}"], dim=1)
 
-        return feats_vol, feats_fpn, depth_map, depth_values
+        return feats_vol, feats_fpn, depth_map, depth_values, semantic_feats

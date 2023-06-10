@@ -1,5 +1,5 @@
 ### INPUT
-expname = 0601_uniform_depth_guided_bilateral_sampling_grid_3
+expname = 0610_deeper_feat_for_segmentation_with_gt_depth_cross_entropy1_semantic_padding_zeros_only2dfeat
 logdir = ./logs_klevr/
 nb_views = 6
 

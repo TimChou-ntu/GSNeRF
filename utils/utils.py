@@ -578,12 +578,12 @@ def normal_vect(vect, dim=-1):
     return vect / (torch.sqrt(torch.sum(vect**2, dim=dim, keepdim=True)) + 1e-7)
 
 
-def interpolate_3D(feats, pts_ndc):
+def interpolate_3D(feats, pts_ndc, padding_mode='border'):
     H, W = pts_ndc.shape[-3:-1]
     grid = pts_ndc.view(-1, 1, H, W, 3) * 2 - 1.0  # [1 1 H W 3] (x,y,z)
     features = (
         F.grid_sample(
-            feats, grid, align_corners=True, mode="bilinear", padding_mode="border"
+            feats, grid, align_corners=True, mode="bilinear", padding_mode=padding_mode
         )[:, :, 0]
         .permute(2, 3, 0, 1)
         .squeeze()
@@ -592,7 +592,7 @@ def interpolate_3D(feats, pts_ndc):
     return features
 
 
-def interpolate_2D(feats, imgs, pts_ndc):
+def interpolate_2D(feats, imgs, pts_ndc, padding_mode='border'):
     '''
     getting the features and images at the points / a image and feature
     feats: (1,8,256,256)
@@ -604,14 +604,14 @@ def interpolate_2D(feats, imgs, pts_ndc):
     grid = pts_ndc[..., :2].view(-1, H, W, 2) * 2 - 1.0  # [1 H W 2] (x,y) (1,4096,128,2)
     features = ( 
         F.grid_sample(
-            feats, grid, align_corners=True, mode="bilinear", padding_mode="border"
+            feats, grid, align_corners=True, mode="bilinear", padding_mode=padding_mode
         )
         .permute(2, 3, 1, 0)
         .squeeze()
     )
     images = (
         F.grid_sample(
-            imgs, grid, align_corners=True, mode="bilinear", padding_mode="border"
+            imgs, grid, align_corners=True, mode="bilinear", padding_mode=padding_mode
         )
         .permute(2, 3, 1, 0)
         .squeeze()

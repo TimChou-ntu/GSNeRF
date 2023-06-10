@@ -342,9 +342,10 @@ class Renderer(nn.Module):
 class Semantic_predictor(nn.Module):
     def __init__(self, nb_view=6, nb_class=0):
         super(Semantic_predictor, self).__init__()
-
+        self.nb_class = nb_class
         self.dim = 32
-        self.attn_token_gen = nn.Linear(24 + 1 + 8, self.dim)
+        # self.attn_token_gen = nn.Linear(24 + 1 + self.nb_class, self.dim)
+        self.attn_token_gen = nn.Linear(1 + self.nb_class, self.dim)
         self.semantic_dim = self.dim * nb_view
 
         # Self-Attention Settings, This attention is cross-view attention for a point, which represent a pixel in target view
@@ -372,14 +373,15 @@ class Semantic_predictor(nn.Module):
 
         feat = feat.view(-1, *feat.shape[2:]) # (num_rays * num_samples, num_views, feat_dim)
         v_feat = feat[..., :24]
-        s_feat = feat[..., 24 : 24 + 8]
-        colors = feat[..., 24 + 8 : -1]
+        s_feat = feat[..., 24 : 24 + self.nb_class]
+        colors = feat[..., 24 + self.nb_class : -1]
         vis_mask = feat[..., -1:].detach()
 
         occ_masks = occ_masks.view(-1, *occ_masks.shape[2:])
 
         tokens = F.elu(
-            self.attn_token_gen(torch.cat([v_feat, vis_mask, s_feat], dim=-1))
+            # self.attn_token_gen(torch.cat([v_feat, vis_mask, s_feat], dim=-1))
+            self.attn_token_gen(torch.cat([vis_mask, s_feat], dim=-1))
         )
 
         ## If a point is not visible by any source view, force its masks to enabled
@@ -387,15 +389,15 @@ class Semantic_predictor(nn.Module):
         vis_mask = vis_mask.masked_fill(vis_mask.sum(dim=1, keepdims=True) == 0, 1)
 
         ## Taking occ_masks into account, but remembering if there were any visibility before that
-        # mask_cloned = vis_mask.clone()
-        # vis_mask *= occ_masks
-        # vis_mask = vis_mask.masked_fill(vis_mask.sum(dim=1, keepdims=True) == 1, 1)
-        # masks = vis_mask * mask_cloned
+        mask_cloned = vis_mask.clone()
+        vis_mask *= occ_masks
+        vis_mask = vis_mask.masked_fill(vis_mask.sum(dim=1, keepdims=True) == 0, 1)
+        masks = vis_mask * mask_cloned
 
         ## Performing self-attention on source view features, 
         for layer in self.attn_layers:
-            # tokens, _ = layer(tokens, masks)
-            tokens, _ = layer(tokens, vis_mask)
+            tokens, _ = layer(tokens, masks)
+            # tokens, _ = layer(tokens, vis_mask)
 
         ## Predicting semantic with MLP
         ## tokens shape: (N*S, V, dim), S = 1
