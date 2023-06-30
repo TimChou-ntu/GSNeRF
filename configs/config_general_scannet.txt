@@ -1,0 +1,24 @@
+### INPUT
+expname = 0625_scannet_withdepthloss_withsemanticfeatloss_semanticnetwasntinoptimizer
+logdir = ./logs_scannet/
+nb_views = 8
+
+### number of class + 1
+nb_class = 21
+ignore_label = 20
+
+## dataset
+dataset_name = scannet
+scannet_path = "/home/timothy/Desktop/2023Spring/Semantic-Ray/data/scannet"
+scene = None
+val_set_list = "configs/lists/scannetv2_val_split.txt"
+
+### TESTING
+chunk = 4096  ### Reduce it to save memory
+
+### TRAINING
+### num_steps = 250000
+num_steps = 600000
+lrate = 0.0005
+logger = wandb
+batch_size = 1024

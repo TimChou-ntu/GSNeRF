@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 # This depth map seems to be slow and inaccurate
 def dense_map(Pts, n, m, grid):
     ng = 2 * grid + 1
@@ -34,8 +35,16 @@ def dense_map(Pts, n, m, grid):
             del s
     
     S[S == 0] = 1
-    out = torch.zeros((m,n)).to(Pts.device)
+    # out = torch.zeros((m,n)).to(Pts.device)
+    # set to the far range of the dataset, TODO: change this to be more general
+    out = torch.ones((m,n)).to(Pts.device)*10.0
+    # incase Y and S goes too big and becomes inf, we set inf to the biggest value of Y/S respectively
+    Y = torch.nan_to_num(Y, posinf=Y[Y!=torch.inf].max().item())
+    S = torch.nan_to_num(S, posinf=S[S!=torch.inf].max().item())
     out[grid + 1 : -grid, grid + 1 : -grid] = Y/S
+    out = F.pad(out[grid + 1 : -grid, grid + 1 : -grid].unsqueeze(0), (grid+1, grid, grid+1, grid), mode='replicate').squeeze(0)
+    if torch.isnan(out).any():
+        print('Nan in depth map')
     del mX, mY, mD, KmX, KmY, KmD, S, Y, y_, x_, int_x, int_y
     return out
 
@@ -95,11 +104,14 @@ def get_target_view_depth(source_depths, source_intrinsics, source_c2ws, target_
     # ray_pts_ndc[:, 0] = ray_pts_ndc[:, 0] / ray_pts_ndc[:, 2]
     # ray_pts_ndc[:, 1] = ray_pts_ndc[:, 1] / ray_pts_ndc[:, 2]
     mask = (ndc[:, 0] >= 0) & (ndc[:, 0] <= W-1) & (ndc[:, 1] >= 0) & (ndc[:, 1] <= H-1)
-    mask = mask & (ray_pts_transformed[:, 2] > 2)
+    # when doing scannet dataset this is not necessary, cause the ndc depth more than 2
+    # mask = mask & (ray_pts_transformed[:, 2] > 2)
     points_2d = ndc[mask, 0:2]
 
     lidarOnImage = torch.cat((points_2d, ray_pts_transformed[mask,2].reshape(-1,1)), 1)
-    depth_map = dense_map(lidarOnImage.t(), H, W, grid_size)
+    if torch.isnan(lidarOnImage).any():
+        print("lidarOnImage has nan")
+    depth_map = dense_map(lidarOnImage.t(), W, H, grid_size)
     # del ray_pts_ndc, target_intrinsics, ray_pts_transformed
     # del ys, xs, ray_pts_transformed, points, points_2d, ray_pts_ndc, mask, lidarOnImage, R, T
     # depth_map = torch.ones_like(source_depths[0]).to("cuda")

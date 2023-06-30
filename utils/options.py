@@ -27,10 +27,11 @@ def config_parser():
 
     # Task options
     parser.add_argument("--segmentation", action="store_true", help="Use segmentation mask for training")
-    parser.add_argument("--nb_class", type=int, default=6, help="Number of classes for segmentation")
+    parser.add_argument("--nb_class", type=int, default=21, help="Number of classes for segmentation")
+    parser.add_argument("--ignore_label", type=int, default=20, help="Ignore label for segmentation")
 
     # Datasets options
-    parser.add_argument("--dataset_name", type=str, default="llff", choices=["llff", "nerf", "dtu", "klevr"],)
+    parser.add_argument("--dataset_name", type=str, default="llff", choices=["llff", "nerf", "dtu", "klevr", "scannet"],)
     parser.add_argument("--llff_path", type=str, help="Path to llff dataset")
     parser.add_argument("--llff_test_path", type=str, help="Path to llff dataset")
     parser.add_argument("--dtu_path", type=str, help="Path to dtu dataset")
@@ -40,6 +41,10 @@ def config_parser():
     parser.add_argument("--ibrnet1_path", type=str, help="Path to ibrnet1 dataset")
     parser.add_argument("--ibrnet2_path", type=str, help="Path to ibrnet2 dataset")
     parser.add_argument("--klevr_path", type=str, help="Path to klevr dataset")
+    parser.add_argument("--scannet_path", type=str, help="Path to scannet dataset")
+
+    # for scannet dataset
+    parser.add_argument("--val_set_list", type=str, help="Path to scannet val dataset list")
 
     # Training options
     parser.add_argument("--batch_size", type=int, default=512)
@@ -65,6 +70,7 @@ def config_parser():
     parser.add_argument("--seed", type=int, default=123, help="Random seed")
     parser.add_argument("--val_save_img_type", default=["target"], action="append", help="choices=[target, depth, source], Save target comparison images or depth maps or source images")
     parser.add_argument("--target_depth_estimation", action="store_true", help="Use target depth estimation in rendering process")
+    parser.add_argument("--use_depth_refine_net", action="store_true", help="Use depth refine net before rendering process")
 
     # resume options
     parser.add_argument("--ckpt_path", type=str, default=None, help="Path to a checkpoint to resume training")

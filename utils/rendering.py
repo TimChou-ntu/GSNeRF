@@ -68,7 +68,7 @@ class Embedder:
             freq_bands = 2.0 ** torch.linspace(0.0, max_freq, steps=N_freqs)
         else:
             freq_bands = torch.linspace(2.0**0.0, 2.0**max_freq, steps=N_freqs)
-        self.freq_bands = freq_bands.reshape(1, -1, 1).cuda()
+        self.freq_bands = freq_bands.reshape(1, -1, 1)
 
         for freq in freq_bands:
             for p_fn in self.kwargs["periodic_fns"]:
@@ -78,6 +78,7 @@ class Embedder:
 
     def embed(self, inputs):
         repeat = inputs.dim() - 1
+        self.freq_bands = self.freq_bands.to(inputs.device)
         inputs_scaled = (
             inputs.unsqueeze(-2) * self.freq_bands.view(*[1] * repeat, -1, 1)
         ).reshape(*inputs.shape[:-1], -1)
@@ -147,9 +148,7 @@ def interpolate_pts_feats(imgs, feats_fpn, feats_vol, rays_pts_ndc, padding_mode
     interpolated_feats = []
 
     for i in range(nb_views):
-        ray_feats_0 = interpolate_3D(
-            feats_vol[f"level_0"][:, i], rays_pts_ndc[f"level_0"][:, :, i], padding_mode=padding_mode
-        )
+        ray_feats_0 = interpolate_3D(feats_vol[f"level_0"][:, i], rays_pts_ndc[f"level_0"][:, :, i], padding_mode=padding_mode)
         ray_feats_1 = interpolate_3D(
             feats_vol[f"level_1"][:, i], rays_pts_ndc[f"level_1"][:, :, i], padding_mode=padding_mode
         )
@@ -178,7 +177,8 @@ def interpolate_pts_feats(imgs, feats_fpn, feats_vol, rays_pts_ndc, padding_mode
             )
         )
     interpolated_feats = torch.stack(interpolated_feats, dim=2)
-
+    if torch.isnan(interpolated_feats).any():
+        print("interpolated_feats has nan values")
     return interpolated_feats
 
 

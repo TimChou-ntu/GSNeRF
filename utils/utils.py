@@ -211,7 +211,6 @@ def visualize_depth(depth, minmax=None, cmap=cv2.COLORMAP_JET):
         ma = np.max(x)
     else:
         mi, ma = minmax
-
     x = (x - mi) / (ma - mi + 1e-8)  # normalize to 0~1
     x = (255 * x).astype(np.uint8)
     x_ = Image.fromarray(cv2.applyColorMap(x, cmap))
@@ -461,7 +460,10 @@ def get_sample_points(
         for l in range(3):
             middle_ray_pts_ndc[f"level_{l}"] = torch.stack(middle_ray_pts_ndc[f"level_{l}"], dim=2)
             all_ray_pts_ndc[f"level_{l}"] = torch.stack(all_ray_pts_ndc[f"level_{l}"], dim=2)
-
+        if torch.isnan(all_ray_pts_ndc["level_0"]).any():
+            print("NAN in all_ray_pts_ndc")
+        if torch.isnan(middle_ray_pts_ndc["level_0"]).any():
+            print("NAN in middle_ray_pts_ndc")
         return pts_depth[:,1:], ray_pts[:,1:], all_ray_pts_ndc, pts_depth[:,:1], ray_pts[:,:1], middle_ray_pts_ndc
 
 
@@ -581,6 +583,9 @@ def normal_vect(vect, dim=-1):
 def interpolate_3D(feats, pts_ndc, padding_mode='border'):
     H, W = pts_ndc.shape[-3:-1]
     grid = pts_ndc.view(-1, 1, H, W, 3) * 2 - 1.0  # [1 1 H W 3] (x,y,z)
+    # grid should be restrict to [-1,1], normal case don't matters, but when the grid is infinite, it will cause error
+    eps = 1e-3
+    grid = torch.clamp(grid, -1-eps, 1+eps)
     features = (
         F.grid_sample(
             feats, grid, align_corners=True, mode="bilinear", padding_mode=padding_mode
@@ -602,6 +607,9 @@ def interpolate_2D(feats, imgs, pts_ndc, padding_mode='border'):
     '''
     H, W = pts_ndc.shape[-3:-1] 
     grid = pts_ndc[..., :2].view(-1, H, W, 2) * 2 - 1.0  # [1 H W 2] (x,y) (1,4096,128,2)
+    # grid should be restrict to [-1,1], normal case don't matters, but when the grid is infinite, it will cause error
+    eps = 1e-3
+    grid = torch.clamp(grid, -1-eps, 1+eps)
     features = ( 
         F.grid_sample(
             feats, grid, align_corners=True, mode="bilinear", padding_mode=padding_mode
@@ -748,6 +756,16 @@ def batched_angular_dist_rot_matrix(R1, R2):
         )
     )
 
+def compute_nearest_camera_indices(database, que_ids, ref_ids=None):
+    if ref_ids is None: ref_ids = que_ids
+    ref_poses = [database.get_pose(ref_id) for ref_id in ref_ids]
+    ref_cam_pts = np.asarray([-pose[:, :3].T @ pose[:, 3] for pose in ref_poses])
+    que_poses = [database.get_pose(que_id) for que_id in que_ids]
+    que_cam_pts = np.asarray([-pose[:, :3].T @ pose[:, 3] for pose in que_poses])
+
+    dists = np.linalg.norm(ref_cam_pts[None, :, :] - que_cam_pts[:, None, :], 2, 2)
+    dists_idx = np.argsort(dists, 1)
+    return dists_idx
 
 def get_nearest_pose_ids(
     tar_pose,
@@ -788,13 +806,51 @@ def get_nearest_pose_ids(
 
     return selected_ids
 
+def downsample_gaussian_blur(img, ratio):
+    sigma = (1 / ratio) / 3
+    # ksize=np.ceil(2*sigma)
+    ksize = int(np.ceil(((sigma - 0.8) / 0.3 + 1) * 2 + 1))
+    ksize = ksize + 1 if ksize % 2 == 0 else ksize
+    img = cv2.GaussianBlur(img, (ksize, ksize), sigma, borderType=cv2.BORDER_REFLECT101)
+    return img
+
+def pose_inverse(pose):
+    R = pose[:, :3].T
+    t = - R @ pose[:, 3:]
+    return np.concatenate([R, t], -1)
+
+
+# lable_color_map = np.array([
+#        [0.        , 0.        , 0.        ],
+#        [0.        , 0.        , 1.        ],
+#        [1.        , 0.        , 0.        ],
+#        [0.        , 1.        , 0.        ],
+#        [0.        , 0.        , 0.35294118],
+#        [0.        , 0.31372549, 0.39215686],
+#        [0.        , 0.        , 0.90196078],
+#        [0.46666667, 0.04313725, 0.1254902 ],
+#        [0.        , 0.        , 0.55686275]])
+
 lable_color_map = np.array([
-       [0.        , 0.        , 0.        ],
-       [0.        , 0.        , 1.        ],
-       [1.        , 0.        , 0.        ],
-       [0.        , 1.        , 0.        ],
-       [0.        , 0.        , 0.35294118],
-       [0.        , 0.31372549, 0.39215686],
-       [0.        , 0.        , 0.90196078],
-       [0.46666667, 0.04313725, 0.1254902 ],
-       [0.        , 0.        , 0.55686275]])
+    [174, 199, 232],  # wall
+    [152, 223, 138],  # floor
+    [31, 119, 180],   # cabinet
+    [255, 187, 120],  # bed
+    [188, 189, 34],   # chair
+    [140, 86, 75],    # sofa
+    [255, 152, 150],  # table
+    [214, 39, 40],    # door
+    [197, 176, 213],  # window
+    [148, 103, 189],  # bookshelf
+    [196, 156, 148],  # picture
+    [23, 190, 207],   # counter
+    [247, 182, 210],  # desk
+    [219, 219, 141],  # curtain
+    [255, 127, 14],   # refrigerator
+    [91, 163, 138],   # shower curtain
+    [44, 160, 44],    # toilet
+    [112, 128, 144],  # sink
+    [227, 119, 194],  # bathtub
+    [82, 84, 163],    # otherfurn
+    [248, 166, 116],  # invalid
+    ])/255.0

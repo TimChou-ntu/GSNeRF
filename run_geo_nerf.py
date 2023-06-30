@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import kornia
@@ -16,10 +17,11 @@ import imageio
 import lpips
 from skimage.metrics import structural_similarity as ssim
 # from torchmetrics import JaccardIndex
-from utils.metrics import calculate_segmentation_metrics
+from utils.metrics import calculate_segmentation_metrics, IoU
 
 from model.geo_reasoner import CasMVSNet
 from model.self_attn_renderer import Renderer, Semantic_predictor
+from model.UNet import UNet
 from utils.rendering import render_rays
 from utils.utils import (
     load_ckpt,
@@ -42,6 +44,7 @@ from data.get_datasets import (
     get_finetuning_dataset,
     get_validation_dataset,
 )
+from utils.loss import SemanticLoss
 
 lpips_fn = lpips.LPIPS(net="vgg")
 
@@ -53,18 +56,23 @@ class GeoNeRF(LightningModule):
         self.wr_cntr = 0
 
         self.depth_loss = SL1Loss()
-        self.semantic_loss = torch.nn.CrossEntropyLoss()
+        # self.semantic_loss = torch.nn.CrossEntropyLoss()
+        self.semantic_loss = SemanticLoss(nb_class=hparams.nb_class, ignore_label=hparams.ignore_label)
+        self.semantic_feat_loss = nn.CrossEntropyLoss(ignore_index=hparams.ignore_label)
+        self.target_depth_loss = nn.SmoothL1Loss(reduction="mean")
         self.learning_rate = hparams.lrate
 
         # Create geometry_reasoner and renderer models
         self.geo_reasoner = CasMVSNet(use_depth=hparams.use_depth, nb_class=hparams.nb_class).cuda()
         self.renderer = Renderer(nb_samples_per_ray=hparams.nb_coarse + hparams.nb_fine).cuda()
         self.semantic_net = Semantic_predictor(nb_view=hparams.nb_views, nb_class=hparams.nb_class).cuda()
-
+        if hparams.target_depth_estimation & hparams.use_depth_refine_net:
+            self.depth_refine_net = UNet(in_channels=1, out_channels=1).cuda()
 
         self.eval_metric = [0.01, 0.05, 0.1]
         # self.miou = JaccardIndex(task="multiclass",num_classes=hparams.nb_class, ignore_index=0)
-        self.miou = calculate_segmentation_metrics
+        # self.miou = calculate_segmentation_metrics
+        self.miou = IoU(num_classes=hparams.nb_class, ignore_label=hparams.ignore_label)
         self.automatic_optimization = False
         self.save_hyperparameters()
 
@@ -93,11 +101,18 @@ class GeoNeRF(LightningModule):
     def configure_optimizers(self):
         eps = 1e-5
 
-        opt = torch.optim.Adam(
-            list(self.geo_reasoner.parameters()) + list(self.renderer.parameters()),
-            lr=self.learning_rate,
-            betas=(0.9, 0.999),
-        )
+        if self.hparams.target_depth_estimation & self.hparams.use_depth_refine_net:
+            opt = torch.optim.Adam(
+                list(self.geo_reasoner.parameters()) + list(self.renderer.parameters()) + list(self.semantic_net.parameters()) + list(self.depth_refine_net.parameters()),
+                lr=self.learning_rate,
+                betas=(0.9, 0.999),
+            )
+        else:
+            opt = torch.optim.Adam(
+                list(self.geo_reasoner.parameters()) + list(self.renderer.parameters()) + list(self.semantic_net.parameters()),
+                lr=self.learning_rate,
+                betas=(0.9, 0.999),
+            )
         sch = CosineAnnealingLR(opt, T_max=self.hparams.num_steps, eta_min=eps)
 
         return [opt], [sch]
@@ -147,7 +162,11 @@ class GeoNeRF(LightningModule):
                 - depth_values[f"level_{l}"][:, :, 0]
             )
 
-        unpre_imgs = self.unpreprocess(batch["images"])
+        ## currently scannet dataset no normalizing
+        if self.hparams.dataset_name != 'scannet':
+            unpre_imgs = self.unpreprocess(batch["images"])
+        else:
+            unpre_imgs = batch["images"]
 
         # Get the target depth map
         if self.hparams.target_depth_estimation:
@@ -160,10 +179,14 @@ class GeoNeRF(LightningModule):
                 (W, H),
                 3, # grid size set to 1 for now, can be changed to 2 or 4
             )
-            target_depth_estimation = kornia.filters.bilateral_blur(target_depth_estimation.unsqueeze(0).unsqueeze(0), (5, 5), 1, (2, 2)).squeeze()
+            target_depth_estimation = kornia.filters.bilateral_blur(target_depth_estimation.unsqueeze(0).unsqueeze(0), (3, 3), 1, (2, 2)).squeeze()
+            
+            if self.hparams.target_depth_estimation & self.hparams.use_depth_refine_net:
+                target_depth_estimation = self.depth_refine_net(target_depth_estimation.unsqueeze(0).unsqueeze(0))['logits'].squeeze()
 
             # target_depth_estimation = torch.ones_like(depth_map["level_0"][0, 0]).to("cuda")
-
+            if torch.isnan(target_depth_estimation).any():
+                print("nan in target depth estimation")
         else:
             target_depth_estimation = None
 
@@ -220,6 +243,12 @@ class GeoNeRF(LightningModule):
             semantic_net=self.semantic_net,
             semantic_feat=semantic_feats,
         )
+
+        # semantic_feats might be supervised by ground truth segmentation, batch size=1
+        semantic_feats_loss = self.semantic_feat_loss(semantic_feats.squeeze(), batch["semantics"][0, :nb_views])
+
+        # target_depth might be supervised by ground truth depth, batch size=1
+        # target_depth_loss = self.target_depth_loss(target_depth_estimation, batch["depths_h"][0, -1])
 
         # Supervising depth maps with either ground truth depth or self-supervision loss
         # This loss is only used in the generalizable model
@@ -295,8 +324,10 @@ class GeoNeRF(LightningModule):
         mse_loss = img2mse(rendered_rgb, rays_gt_rgb)
         if torch.isnan(mse_loss):
             print("Nan mse loss encountered, skipping batch...")
-        loss = loss + mse_loss + croos_entropy_loss
-        # loss = loss + mse_loss
+        # loss = loss + mse_loss + croos_entropy_loss*0.1
+        loss = loss + mse_loss + croos_entropy_loss*0.1 + semantic_feats_loss*0.1
+        # loss = loss + mse_loss + croos_entropy_loss*0.1 + semantic_feats_loss*0.1 + target_depth_loss
+        # loss = mse_loss + croos_entropy_loss*0.01
         if torch.isnan(loss):
             print("Nan loss encountered, skipping batch...")
             img_vis = (
@@ -326,6 +357,7 @@ class GeoNeRF(LightningModule):
                 self.log("train/PSNR", psnr.item(), prog_bar=False)
                 self.log("train/img_mse_loss", mse_loss.item(), prog_bar=False)
                 self.log("train/semantic_loss", croos_entropy_loss.item(), prog_bar=False)
+                self.log("train/semantic_feats_loss", semantic_feats_loss.item(), prog_bar=False)
 
             # Manual Optimization
             opt = self.optimizers()
@@ -403,8 +435,12 @@ class GeoNeRF(LightningModule):
                     - depth_values[f"level_{l}"][:, :, 0]
                 )
 
-            unpre_imgs = self.unpreprocess(batch["images"])
-
+            ## currently scannet dataset no normalizing
+            if self.hparams.dataset_name != 'scannet':
+                unpre_imgs = self.unpreprocess(batch["images"])
+            else:
+                unpre_imgs = batch["images"]
+                
             # Get the target depth map
             if self.hparams.target_depth_estimation:
                 target_depth_estimation = get_target_view_depth(
@@ -417,8 +453,10 @@ class GeoNeRF(LightningModule):
                     3, # grid size set to 1 for now, can be changed to 2 or 4
                 )
                 # Bilateral filtering
-                target_depth_estimation = kornia.filters.bilateral_blur(target_depth_estimation.unsqueeze(0).unsqueeze(0), (5, 5), 1, (2, 2)).squeeze()
-                # target_depth_estimation = torch.ones_like(depth_map["level_0"][0, 0]).to("cuda")
+                target_depth_estimation = kornia.filters.bilateral_blur(target_depth_estimation.unsqueeze(0).unsqueeze(0), (3, 3), 1, (2, 2)).squeeze()
+
+                if self.hparams.target_depth_estimation & self.hparams.use_depth_refine_net:
+                    target_depth_estimation = self.depth_refine_net(target_depth_estimation.unsqueeze(0).unsqueeze(0))['logits'].squeeze()
             else:
                 target_depth_estimation = None
 
@@ -444,6 +482,7 @@ class GeoNeRF(LightningModule):
                 )
 
                 # Rendering
+                # torch.save(rays_pts, f'./check/{batch_nb}_{chunk_idx}_rays_pts.pt')
                 rend_rgb, ren_semantic, rend_depth = render_rays(
                     c2ws=batch["c2ws"][0, :nb_views],
                     rays_pts=rays_pts,
@@ -486,19 +525,19 @@ class GeoNeRF(LightningModule):
             unpre_imgs = unpre_imgs.cpu()
             rendered_rgb, rendered_depth = rendered_rgb.cpu(), rendered_depth.cpu()
             rendered_semantic_pred = torch.argmax(rendered_semantic, dim=0).cpu()
-            pred_imgs = torch.from_numpy(np.array([lable_color_map[p] for p in rendered_semantic_pred])).permute(2, 0, 1)
+            pred_imgs = torch.from_numpy(lable_color_map[rendered_semantic_pred]).permute(2, 0, 1)
+            gt_img = torch.from_numpy(lable_color_map[batch["semantics"][0, -1].cpu()]).permute(2, 0, 1)
             img_err_abs = (rendered_rgb_masked - img_gt_masked).abs()
+            semantic_feats_img = torch.from_numpy(lable_color_map[torch.argmax(semantic_feats, dim=2).cpu()])[0].permute(0, 3, 1, 2)
+            semantic_gt_img = torch.from_numpy(lable_color_map[batch["semantics"][0, :nb_views].cpu()]).permute(0, 3, 1, 2)
 
             ## Compute miou
             if self.hparams.segmentation:
-                miou, miou_valid_class, total_accuracy, class_average_accuracy, ious = self.miou(
+                iou_score = self.miou(
                     true_labels=batch["semantics"][0, -1].reshape(-1),
                     predicted_labels=rendered_semantic_pred.reshape(-1),
-                    number_classes=self.hparams.nb_class,
-                    # ignore_label=0,
                 )
-                loss["val_miou"] = torch.tensor(miou_valid_class)
-
+                loss["val_miou"] = iou_score["miou"].clone().detach()
             depth_target = batch["depths_h"][0, -1].cpu()
             mask_target = depth_target > 0
 
@@ -547,13 +586,39 @@ class GeoNeRF(LightningModule):
 
             # Visualize target comparison
             if "target" in self.hparams.val_save_img_type:
-                rendered_depth_vis, _ = visualize_depth(rendered_depth, depth_minmax)
+
+                semantic_vis = (
+                    semantic_feats_img
+                    .clip(0, 1)
+                    .permute(2, 0, 3, 1)
+                    .reshape(H, -1, 3)
+                    .numpy()
+                )
+                semantic_gt_vis = (
+                    semantic_gt_img
+                    .clip(0, 1)
+                    .permute(2, 0, 3, 1)
+                    .reshape(H, -1, 3)
+                    .numpy()
+                )
+                imageio.imwrite(
+                    f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/{folder}/{self.global_step:08d}/{self.wr_cntr:02d}_semantic.png",
+                    (semantic_vis * 255).astype("uint8"),
+                )
+                imageio.imwrite(
+                    f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/{folder}/{self.global_step:08d}/{self.wr_cntr:02d}_semantic_gt.png",
+                    (semantic_gt_vis * 255).astype("uint8"),
+                )
+
+
+
+                rendered_depth_vis, _ = visualize_depth(rendered_depth)
 
                 img_vis = (
                     torch.cat(
                         (
                             unpre_imgs[:, -1],
-                            torch.stack([rendered_rgb, pred_imgs, img_err_abs * 5]),
+                            torch.stack([rendered_rgb, pred_imgs, gt_img, img_err_abs * 5]),
                             rendered_depth_vis[None],
                         ),
                         dim=0,
@@ -578,34 +643,34 @@ class GeoNeRF(LightningModule):
                 
                 # all images (source and target)
                 for i in range(batch["depths_h"].shape[1]):
-                    gt_depth_vis.append(visualize_depth(batch["depths_h"][0, i], depth_minmax)[0])
+                    gt_depth_vis.append(visualize_depth(batch["depths_h"][0, i])[0])
                
                 # only source image
                 for i in range(depth_map['level_0'].shape[1]):
-                    depth_map_vis.append(visualize_depth(depth_map['level_0'][0, i], depth_minmax)[0])
+                    depth_map_vis.append(visualize_depth(depth_map['level_0'][0, i])[0])
 
                 # only target image
-                target_depth.append(visualize_depth(target_depth_estimation, depth_minmax)[0])
+                target_depth.append(visualize_depth(target_depth_estimation)[0])
                 # filtered_depth.append(visualize_depth(kornia.filters.bilateral_blur(target_depth_estimation.unsqueeze(0).unsqueeze(0), (5, 5), 1, (2, 2)).squeeze(), depth_minmax)[0])
                 
                 # uncomment this for visualization of GT depth maps
-                # depth_vis = (
-                #     torch.cat(
-                #         (
-                #             torch.stack(gt_depth_vis),
-                #         ),
-                #         dim=0,
-                #     )
-                #     .clip(0, 1)
-                #     .permute(2, 0, 3, 1)
-                #     .reshape(H, -1, 3)
-                #     .numpy()
-                # )
+                depth_vis = (
+                    torch.cat(
+                        (
+                            torch.stack(gt_depth_vis),
+                        ),
+                        dim=0,
+                    )
+                    .clip(0, 1)
+                    .permute(2, 0, 3, 1)
+                    .reshape(H, -1, 3)
+                    .numpy()
+                )
 
-                # imageio.imwrite(
-                #     f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/{folder}/{self.global_step:08d}/depth_{self.wr_cntr:02d}.png",
-                #     (depth_vis * 255).astype("uint8"),
-                # )
+                imageio.imwrite(
+                    f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/{folder}/{self.global_step:08d}/depth_{self.wr_cntr:02d}.png",
+                    (depth_vis * 255).astype("uint8"),
+                )
 
                 depth_map_vis_ = (
                     torch.cat(
@@ -778,7 +843,8 @@ if __name__ == "__main__":
         callbacks=[checkpoint_callback],
         logger=logger,
         num_sanity_val_steps=2,
-        val_check_interval=0.3,
+        # val_check_interval=0.3,
+        val_check_interval=0.005,
         check_val_every_n_epoch=1000 if args.scene != 'None' else 1,
         benchmark=True,
         precision='16-mixed' if args.use_amp else 32,

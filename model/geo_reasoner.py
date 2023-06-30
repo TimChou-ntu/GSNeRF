@@ -409,7 +409,7 @@ class CasMVSNet(nn.Module):
         ## Create cost volumes for each view
         for i in range(0, V):
             # permuted_idx = torch.tensor(closest_idxs[0, i]).cuda()
-            permuted_idx = closest_idxs[0, i].clone().detach().cuda()
+            permuted_idx = closest_idxs[0, i].clone().detach().to(feats['level_0'].device)
             # if near_far.sum() == 0:
             #     init_depth_min = 1
             #     depth_interval = 0.1

@@ -1,63 +1,40 @@
 import torch
 import matplotlib.pyplot as plt
 from data.klevr import KlevrDataset
+from data.scannet import RendererDataset
 import cv2
 import numpy as np
 import imageio
 import open3d as o3d
+from utils.depth_map import dense_map
 
 
-dataset = KlevrDataset(
-    root_dir="/home/timothy/Desktop/2023Spring/GeoNeRF/data/data/nesf_data/klevr/",
-    split="val",
-    nb_views=6,
-    get_semantic=True,
-    )
+# dataset = KlevrDataset(
+#     root_dir="/home/timothy/Desktop/2023Spring/GeoNeRF/data/data/nesf_data/klevr/",
+#     split="val",
+#     nb_views=6,
+#     get_semantic=True,
+#     )
+# H, W = 256, 256
+
+dataset = RendererDataset(
+            root_dir="/home/timothy/Desktop/2023Spring/Semantic-Ray/data/scannet",
+            is_train=False
+        )
+H, W = 240, 320
+intrinsic = torch.asarray([[574.540771, 0.000000, 322.522827],
+[0.000000, 577.583740, 238.558853],
+[0.000000, 0.000000, 2.000000]])/2
+
+
 
 data = dataset[0]
 print(data.keys())
 pcd = o3d.geometry.PointCloud()
 
-# From Github https://github.com/balcilar/DenseDepthMap
-def dense_map(Pts, n, m, grid):
-    ng = 2 * grid + 1
-    
-    mX = torch.zeros((m,n)) + torch.tensor(100000).to(torch.float32)
-    mY = torch.zeros((m,n)) + torch.tensor(100000).to(torch.float32)
-    mD = torch.zeros((m,n))
-    y_ = Pts[1].to(torch.int32)
-    x_ = Pts[0].to(torch.int32)
-    mX[y_,x_] = Pts[0] - torch.round(Pts[0])
-    mY[y_,x_] = Pts[1] - torch.round(Pts[1])
-    mD[y_,x_] = Pts[2]
-    
-    KmX = torch.zeros((ng, ng, m - ng, n - ng))
-    KmY = torch.zeros((ng, ng, m - ng, n - ng))
-    KmD = torch.zeros((ng, ng, m - ng, n - ng))
-    
-    for i in range(ng):
-        for j in range(ng):
-            KmX[i,j] = mX[i : (m - ng + i), j : (n - ng + j)] - grid - 1 +i
-            KmY[i,j] = mY[i : (m - ng + i), j : (n - ng + j)] - grid - 1 +i
-            KmD[i,j] = mD[i : (m - ng + i), j : (n - ng + j)]
-    S = torch.zeros_like(KmD[0,0])
-    Y = torch.zeros_like(KmD[0,0])
-    
-    for i in range(ng):
-        for j in range(ng):
-            s = 1/torch.sqrt(KmX[i,j] * KmX[i,j] + KmY[i,j] * KmY[i,j])
-            Y = Y + s * KmD[i,j]
-            S = S + s
-    
-    S[S == 0] = 1
-    out = torch.zeros((m,n))
-    out[grid + 1 : -grid, grid + 1 : -grid] = Y/S
-    return out
-
 source_depths = data["depths_h"][:6]
 target_depths = data["depths_h"][6:]
 points = []
-H, W = 256, 256
 
 ys, xs = torch.meshgrid(
     torch.linspace(0, H - 1, H), torch.linspace(0, W - 1, W), indexing="ij"
@@ -66,7 +43,7 @@ for num in range(source_depths.shape[0]):
     mask = source_depths[num] > 0
     # print(mask.shape)
     ys, xs = ys.reshape(-1), xs.reshape(-1)
-
+# data["intrinsics"][num]
     dirs = torch.stack(
     [
         (xs - data["intrinsics"][num][0, 2]) / data["intrinsics"][num][0, 0],
@@ -89,29 +66,30 @@ for num in range(source_depths.shape[0]):
     points.append(ray_pts.reshape(-1,3))
 
 points = torch.cat(points,0).reshape(-1,3)
-print(points.shape)
+print("calculate point num",points.shape)
 
 w2c_ref = torch.asarray(data["w2cs"][6])
 intrinsics_ref = torch.asarray(data["intrinsics"][6])
-img_width = 256
-img_height = 256
+# intrinsics_ref = intrinsic
 
 R = w2c_ref[:3, :3]  # (3, 3)
 T = w2c_ref[:3, 3:]  # (3, 1)
+for i in range(3):
+    points = torch.cat((points, torch.asarray(data["c2ws"][i][:3,3:].T)), dim=0)
 ray_pts = torch.matmul(points, R.t()) + T.reshape(1, 3)
 
 ray_pts_ndc = ray_pts @ intrinsics_ref.t()
 ray_pts_ndc[:, 0] /= ray_pts_ndc[:, 2]
 ray_pts_ndc[:, 1] /= ray_pts_ndc[:, 2]
-mask = (ray_pts_ndc[:, 0] >= 0) & (ray_pts_ndc[:, 0] <= img_width) & (ray_pts_ndc[:, 1] >= 0) & (ray_pts_ndc[:, 1] <= img_height)
-mask = mask & (ray_pts[:, 2] > 2)
+mask = (ray_pts_ndc[:, 0] >= 0) & (ray_pts_ndc[:, 0] <= W) & (ray_pts_ndc[:, 1] >= 0) & (ray_pts_ndc[:, 1] <= H)
+# mask = mask & (ray_pts[:, 2] > 2)
 points_2d = ray_pts_ndc[mask, 0:2]
 
 lidarOnImage = torch.cat((points_2d, ray_pts[mask,2].reshape(-1,1)), 1)
 
 out = []
 for i in range(5):
-    out.append(dense_map(lidarOnImage.T, 256, 256, i+1))
+    out.append(dense_map(lidarOnImage.T, W, H, i+1))
     print(out[i].shape)
 fig, axs = plt.subplots(5, 3)
 d_gt = np.asarray(data["depths_h"][6])
@@ -146,16 +124,17 @@ d_error = np.abs(d_gt - d_merge)
 print("grid4 error:",d_error.sum())
 axs[4,2].imshow(d_error)
 plt.show()
-# pcd.points = o3d.utility.Vector3dVector(points)
-# o3d.visualization.draw_geometries([pcd])
-
+pcd.points = o3d.utility.Vector3dVector(points)
+o3d.visualization.draw_geometries([pcd])
+pcd = o3d.geometry.PointCloud()
 pcd = o3d.t.geometry.PointCloud()
 for i in range(6):
-    d = o3d.geometry.Image(data["depths_h"][i])
+    d = o3d.geometry.Image(np.asarray(data["depths_h"][i]))
     print(np.asarray(d).max())
     print(np.asarray(d).min())
     cam = o3d.camera.PinholeCameraIntrinsic()
     cam.intrinsic_matrix = data["intrinsics"][i]
+    # cam.intrinsic_matrix = intrinsic
     pcd_i = o3d.geometry.PointCloud.create_from_depth_image(d,cam,data["w2cs"][i])
     point_array = np.asarray(pcd_i.points)
     if i == 0:
@@ -166,21 +145,21 @@ pcd.point.positions = o3d.core.Tensor(total_point, dtype=o3d.core.Dtype.Float32)
 print("Total point number: ",total_point.shape)
 # pcd.points = o3d.utility.Vector3dVector(total_point)
 # o3d.visualization.draw_geometries([pcd])
-# o3d.visualization.draw([pcd])
+o3d.visualization.draw([pcd])
 # print(np.asarray(pcd.points)[:,2].max())
 # print(np.asarray(pcd.points)[:,2].min())
 import sys
 np.set_printoptions(threshold=sys.maxsize)
 # depth_reproj = pcd.project_to_depth_image(width=256,height=256,intrinsic=o3d.core.Tensor(data["intrinsics"][6]),extrinsic=o3d.core.Tensor(data["w2cs"][6]))
 print(type(pcd))
-print(type(o3d.core.Tensor(data["intrinsics"][6])))
+print(type(o3d.core.Tensor(np.asarray(data["intrinsics"][6]))))
 # depth_reproj = pcd.project_to_depth_image(width=256,height=256,intrinsic=o3d.core.Tensor(data["intrinsics"][6]))
 print(data["intrinsics"][6])
 print(data["w2cs"][6])
-intrinsic = o3d.core.Tensor(data["intrinsics"][6])
-extrinsic = o3d.core.Tensor(data["w2cs"][6])
-depth_reproj = pcd.project_to_depth_image(256,
-                                        256,
+intrinsic = o3d.core.Tensor(np.asarray(data["intrinsics"][6]))
+extrinsic = o3d.core.Tensor(np.asarray(data["w2cs"][6]))
+depth_reproj = pcd.project_to_depth_image(W,
+                                        H,
                                         intrinsic,
                                         extrinsic,
                                         depth_scale=1.0,

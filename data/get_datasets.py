@@ -27,6 +27,7 @@ from data.llff import LLFF_Dataset
 from data.dtu import DTU_Dataset
 from data.nerf import NeRF_Dataset
 from data.klevr import KlevrDataset
+from data.scannet import RendererDataset
 
 def get_training_dataset(args, downsample=1.0):
     
@@ -38,6 +39,14 @@ def get_training_dataset(args, downsample=1.0):
             downSample=downsample,
             nb_views=args.nb_views,
             get_semantic=args.segmentation,
+        )
+        train_sampler = None
+        return train_dataset, train_sampler
+    
+    elif args.dataset_name == "scannet":
+        train_dataset = RendererDataset(
+            root_dir=args.scannet_path,
+            is_train=True
         )
         train_sampler = None
         return train_dataset, train_sampler
@@ -171,4 +180,18 @@ def get_validation_dataset(args, downsample=1.0):
             nb_views=args.nb_views,
             get_semantic=args.segmentation,
         )
+    elif args.dataset_name == "scannet":
+        val_set_list, val_set_names = [], []
+        if isinstance(args.val_set_list, str):
+            val_scenes = np.loadtxt(args.val_set_list, dtype=str).tolist()
+            for name in val_scenes:
+                val_cfg = {'val_database_name': name}
+                val_set = RendererDataset(cfg=val_cfg, is_train=False, root_dir=args.scannet_path)
+                val_set_list.append(val_set)
+                val_set_names.append(name)
+                print(f'{name} val set len {len(val_set)}')
+        val_dataset = ConcatDataset(val_set_list)
+    else:
+        raise NotImplementedError
+    
     return val_dataset
