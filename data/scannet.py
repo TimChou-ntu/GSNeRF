@@ -10,7 +10,6 @@ from glob import glob as glob
 from PIL import Image
 from torchvision import transforms as T
 
-from utils.klevr_utils import from_position_and_quaternion, scale_rays, calculate_near_and_far
 from utils.utils import read_pfm, get_nearest_pose_ids, get_rays, compute_nearest_camera_indices
 from utils.scannet_utils import parse_database_name, get_database_split, get_coords_mask, random_crop, random_flip, build_imgs_info, pad_imgs_info, imgs_info_to_torch, imgs_info_slice
 
@@ -289,8 +288,7 @@ class RendererDataset(Dataset):
         
         depth = {}
         for l in range(3):
-            depth_wh = np.round(np.array(depth_h.shape) / (2**l)).astype(np.int32)
-            # depth[f"level_{l}"] = np.array(depth_h.resize(depth_wh, Image.BILINEAR))
+
             depth[f"level_{l}"] = cv2.resize(
                 depth_h,
                 None,
@@ -298,7 +296,6 @@ class RendererDataset(Dataset):
                 fy=1.0 / (2**l),
                 interpolation=cv2.INTER_NEAREST,
             )
-            # depth[f"level_{l}"] = cv2.resize(depth_h, depth_wh, interpolation=cv2.INTER_NEAREST)
             # depth[f"level_{l}"][depth[f"level_{l}"] > far_bound * 0.95] = 0.0
 
         if self.is_train:
@@ -343,19 +340,12 @@ class RendererDataset(Dataset):
         if self.is_train:
             # data augmentation
             depth_range_all = np.concatenate([ref_imgs_info['depth_range'],que_imgs_info['depth_range']],0)
-            if database.database_name.startswith('gso'): # only used in gso currently
-                depth_all = np.concatenate([ref_imgs_info['depth'],que_imgs_info['depth']],0)
-                mask_all = np.concatenate([ref_imgs_info['masks'],que_imgs_info['masks']],0)
-            else:
-                depth_all, mask_all = None, None
+
             depth_range_all = self.random_change_depth_range(depth_range_all)
             ref_imgs_info['depth_range'] = depth_range_all[:-1]
             que_imgs_info['depth_range'] = depth_range_all[-1:]
 
-            # if database.database_name.startswith('gso') and self.cfg['use_depth']:
-            #     depth_aug = self.add_depth_noise(ref_imgs_info['depth'], ref_imgs_info['masks'], ref_imgs_info['depth_range'])
-            #     ref_imgs_info['true_depth'] = ref_imgs_info['depth']
-            #     ref_imgs_info['depth'] = depth_aug
+
 
             if database.database_name.startswith('real_estate') \
                 or database.database_name.startswith('real_iconic') \
@@ -372,15 +362,7 @@ class RendererDataset(Dataset):
         if self.cfg['use_consistent_depth_range']:
             self.consistent_depth_range(ref_imgs_info, que_imgs_info)
 
-        # generate coords
-        # no need in mvsnerf writing style
-        # if self.is_train:
-        #     coords = self.generate_coords_for_training(database,que_imgs_info)
-        # else:
-        #     qn, _, hn, wn = que_imgs_info['imgs'].shape
-        #     coords = np.stack(np.meshgrid(np.arange(wn),np.arange(hn),indexing='xy'),-1)
-        #     coords = coords.reshape([1,-1,2]).astype(np.float32)
-        # que_imgs_info['coords'] = coords
+
         ref_imgs_info = pad_imgs_info(ref_imgs_info,self.cfg['ref_pad_interval'])
 
         # don't feed depth to gpu
@@ -397,30 +379,30 @@ class RendererDataset(Dataset):
             # 'nn_ids' used in constructing cost volume (specify source image ids)
             ref_imgs_info['nn_ids'] = ref_idx.astype(np.int64)
 
-        ref_imgs_info = imgs_info_to_torch(ref_imgs_info)
-        que_imgs_info = imgs_info_to_torch(que_imgs_info)
+        # ref_imgs_info = imgs_info_to_torch(ref_imgs_info)
+        # que_imgs_info = imgs_info_to_torch(que_imgs_info)
 
-        outputs = {'ref_imgs_info': ref_imgs_info, 'que_imgs_info': que_imgs_info, 'scene_name': database.database_name}
-        if self.cfg['use_src_imgs']: outputs['src_imgs_info'] = imgs_info_to_torch(src_imgs_info)
+        # outputs = {'ref_imgs_info': ref_imgs_info, 'que_imgs_info': que_imgs_info, 'scene_name': database.database_name}
+        # if self.cfg['use_src_imgs']: outputs['src_imgs_info'] = imgs_info_to_torch(src_imgs_info)
 
         same_format_as_klevr = True
         if same_format_as_klevr:
             sample = {}
-            sample['images'] = torch.concat((ref_imgs_info['imgs'], que_imgs_info['imgs']), 0)
-            sample['semantics'] = torch.concat((ref_imgs_info['labels'], que_imgs_info['labels']), 0).squeeze(1)
+            sample['images'] = np.concatenate((ref_imgs_info['imgs'], que_imgs_info['imgs']), 0)
+            sample['semantics'] = np.concatenate((ref_imgs_info['labels'], que_imgs_info['labels']), 0).squeeze(1)
 
 
-            # sample['w2cs'] = torch.concat((ref_imgs_info['poses'], que_imgs_info['poses']), 0) # (1+nb_views, 3, 4)
-            # sample['w2cs'] = torch.concat((sample['w2cs'], torch.ones_like(sample['w2cs'])[:,0:1,:]), 1) # (1+nb_views, 4, 4)
+            # sample['w2cs'] = np.concatenate((ref_imgs_info['poses'], que_imgs_info['poses']), 0) # (1+nb_views, 3, 4)
+            # sample['w2cs'] = np.concatenate((sample['w2cs'], torch.ones_like(sample['w2cs'])[:,0:1,:]), 1) # (1+nb_views, 4, 4)
 
-            sample['c2ws'] = torch.concat((ref_imgs_info['poses'], que_imgs_info['poses']), 0) # (1+nb_views, 4, 4)
-            # sample['c2ws'] = torch.concat((sample['c2ws'], torch.ones_like(sample['c2ws'])[:,0:1,:]), 1) # (1+nb_views, 4, 4)
+            sample['c2ws'] = np.concatenate((ref_imgs_info['poses'], que_imgs_info['poses']), 0) # (1+nb_views, 4, 4)
+            # sample['c2ws'] = np.concatenate((sample['c2ws'], torch.ones_like(sample['c2ws'])[:,0:1,:]), 1) # (1+nb_views, 4, 4)
             # sample['c2ws'] = sample['c2ws'] @ self.blender2opencv
 
 
-            sample['intrinsics'] = torch.concat((ref_imgs_info['Ks'], que_imgs_info['Ks']), 0)
-            sample['near_fars'] = torch.concat((ref_imgs_info['depth_range'], que_imgs_info['depth_range']), 0)
-            sample['depths_h'] = torch.concat((ref_imgs_info['depth'], que_imgs_info['depth']), 0).squeeze(1)
+            sample['intrinsics'] = np.concatenate((ref_imgs_info['Ks'], que_imgs_info['Ks']), 0)
+            sample['near_fars'] = np.concatenate((ref_imgs_info['depth_range'], que_imgs_info['depth_range']), 0)
+            sample['depths_h'] = np.concatenate((ref_imgs_info['depth'], que_imgs_info['depth']), 0).squeeze(1)
             sample['closest_idxs'] = ref_imgs_info['nn_ids'] # (nb_view, 4) # used in cost volume construction # hard code to [0:4]
 
             # affine_mats (1+nb_views, 4, 4, 3)
@@ -433,7 +415,7 @@ class RendererDataset(Dataset):
             depths = {"level_0": [], "level_1": [], "level_2": []}
 
             for i in range(sample['c2ws'].shape[0]):
-                sample['w2cs'].append(torch.linalg.inv(sample['c2ws'][i]))
+                sample['w2cs'].append(np.linalg.inv(sample['c2ws'][i]))
                 # sample['w2cs'].append(torch.asarray(np.linalg.inv(np.asarray(sample['c2ws'][i]))))
 
                 aff = []
@@ -441,7 +423,7 @@ class RendererDataset(Dataset):
 
                 for l in range(3):
                     proj_mat_l = np.eye(4)
-                    intrinsic_temp = sample['intrinsics'][i].clone().detach()
+                    intrinsic_temp = sample['intrinsics'][i].copy()
                     intrinsic_temp[:2] = intrinsic_temp[:2]/(2**l)
                     proj_mat_l[:3,:4] = intrinsic_temp @ sample['w2cs'][i][:3,:4]
                     aff.append(proj_mat_l)
@@ -467,7 +449,7 @@ class RendererDataset(Dataset):
             depths["level_2"] = np.stack(depths["level_2"])
 
 
-            sample['w2cs'] = torch.stack(sample['w2cs'], 0) # (1+nb_views, 4, 4)
+            sample['w2cs'] = np.stack(sample['w2cs'], 0) # (1+nb_views, 4, 4)
             sample['affine_mats'] = affine_mats
             sample['affine_mats_inv'] = affine_mats_inv
             sample['depths_aug'] = depths_aug
@@ -476,7 +458,7 @@ class RendererDataset(Dataset):
             return sample
         
         # if same_format_as_klevr == False:
-        return outputs
+        # return outputs
 
     def __len__(self):
         return self.num

@@ -9,7 +9,7 @@ ignore_label = 20
 
 ## dataset
 dataset_name = scannet
-scannet_path = "/home/timothy/Desktop/2023Spring/Semantic-Ray/data/scannet"
+scannet_path = "/mnt/sdb/timothy/Desktop/2023Spring/Semantic-Ray/data/scannet"
 scene = None
 val_set_list = "configs/lists/scannetv2_val_split.txt"
 

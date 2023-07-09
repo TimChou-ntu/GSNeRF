@@ -1,8 +1,8 @@
 To train:
-python run_geo_nerf.py --config configs/config_general_klevr.txt --segmentation --logger wandb --val_save_img_type depth --target_depth_estimation
+python run_geo_nerf.py --config configs/config_general_scannet.txt --segmentation --logger wandb --val_save_img_type depth --target_depth_estimation
 
 To validation:
-python run_geo_nerf.py --config configs/config_general_klevr.txt --segmentation --logger none --val_save_img_type depth --target_depth_estimation --ckpt_path /home/timothy/Desktop/2023Spring/generalized_nerf/logs_klevr/klevr/0531_architecture_memory_corrected_5/ckpts/ckpt_step-049009.ckpt --eval
+python run_geo_nerf.py --config configs/config_general_scannet.txt --segmentation --logger none --val_save_img_type depth --target_depth_estimation --ckpt_path /mnt/sdb/timothy/Desktop/2023Spring/generalized_nerf/logs_scannet/scannet/0625_scannet_withdepthloss_withsemanticfeatloss_semanticnetwasntinoptimizer/ckpts/ckpt_step-324895.ckpt --eval
 
 
 
