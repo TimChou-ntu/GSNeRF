@@ -87,7 +87,8 @@ class UNet(nn.Module):
         self.up2 = (Up(64, 32 , bilinear))
         self.up3 = (Up(32, 16 , bilinear))
         self.up4 = (Up(16, 8, bilinear))
-        self.outc = (OutConv(8, n_classes))
+        self.outc1 = (OutConv(8, n_classes))
+        self.outc2 = (OutConv(n_classes, n_classes))
 
 
         
@@ -112,7 +113,8 @@ class UNet(nn.Module):
         x = self.up2(x, x3)
         x = self.up3(x, x2)
         x = self.up4(x, x1)
-        logits = self.outc(x)
+        feature = self.outc1(x)
+        logits = self.outc2(feature)
 
         # original FeatureNet used in depth estimation
         feat2 = self.toplayer(x3)  # (B, 32, H//4, W//4)
@@ -123,7 +125,7 @@ class UNet(nn.Module):
         feat1 = self.smooth1(feat1)  # (B, 16, H//2, W//2)
         feat0 = self.smooth0(feat0)  # (B, 8, H, W)
 
-        output = {"level_0": feat0, "level_1": feat1, "level_2": feat2, 'logits': logits}
+        output = {"level_0": feat0, "level_1": feat1, "level_2": feat2, 'logits': logits, 'feature': feature}
                   
         return output
 

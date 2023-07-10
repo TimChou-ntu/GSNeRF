@@ -1,5 +1,5 @@
 ### INPUT
-expname = 0625_scannet_withdepthloss_withsemanticfeatloss_semanticnetwasntinoptimizer
+expname = 0710_scannet_withdepthloss_withsemanticfeatloss_semanticnetwasntinoptimizer_semanticfeatnotlogits
 logdir = ./logs_scannet/
 nb_views = 8
 
@@ -11,7 +11,7 @@ ignore_label = 20
 dataset_name = scannet
 scannet_path = "/mnt/sdb/timothy/Desktop/2023Spring/Semantic-Ray/data/scannet"
 scene = None
-val_set_list = "configs/lists/scannetv2_val_split.txt"
+val_set_list = "configs/lists/scannetv2_test_split.txt"
 
 ### TESTING
 chunk = 4096  ### Reduce it to save memory

@@ -401,7 +401,8 @@ class CasMVSNet(nn.Module):
             imgs.reshape(B * V, 3, H, W)
         )  # (B*V, 8, H, W), (B*V, 16, H//2, W//2), (B*V, 32, H//4, W//4)
         feats_fpn = feats[f"level_0"].reshape(B, V, *feats[f"level_0"].shape[1:])
-        semantic_feats = feats[f'logits'].reshape(B, V, *feats[f'logits'].shape[1:])
+        semantic_logits = feats[f'logits'].reshape(B, V, *feats[f'logits'].shape[1:])
+        semantic_feature = feats[f'feature'].reshape(B, V, *feats[f'feature'].shape[1:])
 
         feats_vol = {"level_0": [], "level_1": [], "level_2": []}
         depth_map = {"level_0": [], "level_1": [], "level_2": []}
@@ -441,4 +442,4 @@ class CasMVSNet(nn.Module):
             depth_map[f"level_{l}"] = torch.cat(depth_map[f"level_{l}"], dim=1)
             depth_values[f"level_{l}"] = torch.stack(depth_values[f"level_{l}"], dim=1)
 
-        return feats_vol, feats_fpn, depth_map, depth_values, semantic_feats
+        return feats_vol, feats_fpn, depth_map, depth_values, semantic_logits, semantic_feature

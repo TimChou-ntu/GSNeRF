@@ -143,7 +143,7 @@ class GeoNeRF(LightningModule):
         H, W = int(H), int(W)
 
         ## Inferring Geometry Reasoner
-        feats_vol, feats_fpn, depth_map, depth_values, semantic_feats = self.geo_reasoner(
+        feats_vol, feats_fpn, depth_map, depth_values, semantic_logits, semantic_feats = self.geo_reasoner(
             imgs=batch["images"][:, :nb_views],
             affine_mats=batch["affine_mats"][:, :nb_views],
             affine_mats_inv=batch["affine_mats_inv"][:, :nb_views],
@@ -244,8 +244,8 @@ class GeoNeRF(LightningModule):
             semantic_feat=semantic_feats,
         )
 
-        # semantic_feats might be supervised by ground truth segmentation, batch size=1
-        semantic_feats_loss = self.semantic_feat_loss(semantic_feats.squeeze(), batch["semantics"][0, :nb_views])
+        # semantic_logits might be supervised by ground truth segmentation, batch size=1
+        semantic_logits_loss = self.semantic_feat_loss(semantic_logits.squeeze(), batch["semantics"][0, :nb_views])
 
         # target_depth might be supervised by ground truth depth, batch size=1
         # target_depth_loss = self.target_depth_loss(target_depth_estimation, batch["depths_h"][0, -1])
@@ -325,8 +325,8 @@ class GeoNeRF(LightningModule):
         if torch.isnan(mse_loss):
             print("Nan mse loss encountered, skipping batch...")
         # loss = loss + mse_loss + croos_entropy_loss*0.1
-        loss = loss + mse_loss + croos_entropy_loss*0.1 + semantic_feats_loss*0.1
-        # loss = loss + mse_loss + croos_entropy_loss*0.1 + semantic_feats_loss*0.1 + target_depth_loss
+        loss = loss + mse_loss + croos_entropy_loss*0.2 + semantic_logits_loss*0.2
+        # loss = loss + mse_loss + croos_entropy_loss*0.1 + semantic_logits_loss*0.1 + target_depth_loss
         # loss = mse_loss + croos_entropy_loss*0.01
         if torch.isnan(loss):
             print("Nan loss encountered, skipping batch...")
@@ -357,7 +357,7 @@ class GeoNeRF(LightningModule):
                 self.log("train/PSNR", psnr.item(), prog_bar=False)
                 self.log("train/img_mse_loss", mse_loss.item(), prog_bar=False)
                 self.log("train/semantic_loss", croos_entropy_loss.item(), prog_bar=False)
-                self.log("train/semantic_feats_loss", semantic_feats_loss.item(), prog_bar=False)
+                self.log("train/semantic_feats_loss", semantic_logits_loss.item(), prog_bar=False)
 
             # Manual Optimization
             opt = self.optimizers()
@@ -385,12 +385,6 @@ class GeoNeRF(LightningModule):
             del middle_pts_depth, middle_ray_pts, middle_ray_pts_ndc
 
             
-            # for obj in gc.get_objects():
-            #     try:
-            #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-            #             print(type(obj), obj.size())
-            #     except:
-            #         pass
 
             return {"loss": loss}
 
@@ -416,7 +410,7 @@ class GeoNeRF(LightningModule):
 
         with torch.no_grad():
             ## Inferring Geometry Reasoner
-            feats_vol, feats_fpn, depth_map, depth_values, semantic_feats = self.geo_reasoner(
+            feats_vol, feats_fpn, depth_map, depth_values, semantic_logits, semantic_feats = self.geo_reasoner(
                 imgs=batch["images"][:, :nb_views],
                 affine_mats=batch["affine_mats"][:, :nb_views],
                 affine_mats_inv=batch["affine_mats_inv"][:, :nb_views],
@@ -528,7 +522,7 @@ class GeoNeRF(LightningModule):
             pred_imgs = torch.from_numpy(lable_color_map[rendered_semantic_pred]).permute(2, 0, 1)
             gt_img = torch.from_numpy(lable_color_map[batch["semantics"][0, -1].cpu()]).permute(2, 0, 1)
             img_err_abs = (rendered_rgb_masked - img_gt_masked).abs()
-            semantic_feats_img = torch.from_numpy(lable_color_map[torch.argmax(semantic_feats, dim=2).cpu()])[0].permute(0, 3, 1, 2)
+            semantic_logits_img = torch.from_numpy(lable_color_map[torch.argmax(semantic_logits, dim=2).cpu()])[0].permute(0, 3, 1, 2)
             semantic_gt_img = torch.from_numpy(lable_color_map[batch["semantics"][0, :nb_views].cpu()]).permute(0, 3, 1, 2)
 
             ## Compute miou
@@ -538,6 +532,8 @@ class GeoNeRF(LightningModule):
                     predicted_labels=rendered_semantic_pred.reshape(-1),
                 )
                 loss["val_miou"] = iou_score["miou"].clone().detach()
+                loss["val_acc"] = iou_score["total_accuracy"].clone().detach()
+                loss["val_class_acc"] = iou_score["class_average_accuracy"].clone().detach()
             depth_target = batch["depths_h"][0, -1].cpu()
             mask_target = depth_target > 0
 
@@ -588,7 +584,7 @@ class GeoNeRF(LightningModule):
             if "target" in self.hparams.val_save_img_type:
 
                 semantic_vis = (
-                    semantic_feats_img
+                    semantic_logits_img
                     .clip(0, 1)
                     .permute(2, 0, 3, 1)
                     .reshape(H, -1, 3)
