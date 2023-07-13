@@ -223,10 +223,15 @@ class EncoderLayer(nn.Module):
 
 
 class Renderer(nn.Module):
-    def __init__(self, nb_samples_per_ray):
+    def __init__(self, nb_samples_per_ray, nb_view=8, nb_class=21):
         super(Renderer, self).__init__()
 
+        self.nb_view = nb_view
+        self.nb_class = nb_class
         self.dim = 32
+
+        self.semantic_token_gen = nn.Linear(1 + self.nb_class, self.dim)
+
         self.attn_token_gen = nn.Linear(24 + 1 + 8, self.dim)
 
         ## Self-Attention Settings
@@ -241,6 +246,19 @@ class Renderer(nn.Module):
                 for i in range(num_layers)
             ]
         )
+
+        self.semantic_attn_layers = nn.ModuleList(
+            [
+                EncoderLayer(self.dim, d_inner, n_head, d_k, d_v)
+                for i in range(num_layers)
+            ]
+        )
+
+        self.semantic_dim = self.dim * nb_view
+
+        self.semantic_fc1 = nn.Linear(self.semantic_dim, self.semantic_dim)
+        self.semantic_fc2 = nn.Linear(self.semantic_dim, self.semantic_dim // 2)
+        self.semantic_fc3 = nn.Linear(self.semantic_dim // 2, nb_class)
 
         ## Processing the mean and variance of input features
         self.var_mean_fc1 = nn.Linear(16, self.dim)
@@ -257,9 +275,6 @@ class Renderer(nn.Module):
         self.sigma_fc2 = nn.Linear(self.dim, self.dim // 2)
         self.sigma_fc3 = nn.Linear(self.dim // 2, 1)
 
-        # self.semantic_fc1 = nn.Linear(self.dim, self.dim)
-        # self.semantic_fc2 = nn.Linear(self.dim, self.dim // 2)
-        # self.semantic_fc3 = nn.Linear(self.dim // 2, nb_class)
 
         self.rgb_fc1 = nn.Linear(self.dim + 9, self.dim)
         self.rgb_fc2 = nn.Linear(self.dim, self.dim // 2)
@@ -268,13 +283,14 @@ class Renderer(nn.Module):
         ## Initialization
         self.sigma_fc3.apply(weights_init)
 
-    def forward(self, viewdirs, feat, occ_masks):
+    def forward(self, viewdirs, feat, occ_masks, middle_pts_mask):
         ## Viewing samples regardless of batch or ray
         N, S, V = feat.shape[:3]
         feat = feat.view(-1, *feat.shape[2:])
         v_feat = feat[..., :24]
         s_feat = feat[..., 24 : 24 + 8]
-        colors = feat[..., 24 + 8 : -1]
+        colors = feat[..., 24 + 8 : 24 + 8 + 3]
+        semantic_feat = feat[..., 24 + 8 + 3 : -1]
         vis_mask = feat[..., -1:].detach()
 
         occ_masks = occ_masks.view(-1, *occ_masks.shape[2:])
@@ -291,6 +307,12 @@ class Renderer(nn.Module):
             self.attn_token_gen(torch.cat([v_feat, vis_mask, s_feat], dim=-1))
         )
         tokens = torch.cat([tokens, var_mean], dim=1)
+
+        # by adding middle_pts_mask, we can only take the predicted depth's points into account
+        # (N_rays, 1, views, feat_dim)
+        semantic_tokens = F.elu(
+            self.semantic_token_gen(torch.cat([semantic_feat[middle_pts_mask.view(-1)], vis_mask[middle_pts_mask.view(-1)]], dim=-1))
+        )
 
         ## Adding a new channel to mask for var_mean
         vis_mask = torch.cat(
@@ -309,6 +331,10 @@ class Renderer(nn.Module):
         for layer in self.attn_layers:
             tokens, _ = layer(tokens, masks)
 
+        for semantic_layer in self.semantic_attn_layers:
+            # mask has shape (N_rays*N_points, nb_views+1, 1), because of the var_mean_mask, semantic not using that
+            semantic_tokens, _ = semantic_layer(semantic_tokens, masks[middle_pts_mask.view(-1), :-1])
+
         ## Predicting sigma with an Auto-Encoder and MLP
         sigma_tokens = tokens[:, -1:]
         sigma_tokens = sigma_tokens.view(N, S, self.dim).transpose(1, 2)
@@ -317,7 +343,15 @@ class Renderer(nn.Module):
 
         sigma_tokens_ = F.elu(self.sigma_fc1(sigma_tokens))
         sigma_tokens_ = F.elu(self.sigma_fc2(sigma_tokens_))
+        # sigma shape (N_rays*N_points, 1)
         sigma = torch.relu(self.sigma_fc3(sigma_tokens_[:, 0]))
+
+        semantic_tokens = semantic_tokens.reshape(N, V*self.dim)
+        semantic_tokens_ = F.elu(self.semantic_fc1(semantic_tokens))
+        semantic_tokens_ = F.elu(self.semantic_fc2(semantic_tokens_))
+        semantic_tokens_ = torch.relu(self.semantic_fc3(semantic_tokens_))
+  
+        semantic = semantic_tokens_.reshape(N, -1).unsqueeze(1)
 
         # semantic_tokens_ = F.elu(self.semantic_fc1(sigma_tokens))
         # semantic_tokens_ = F.elu(self.semantic_fc2(semantic_tokens_))
@@ -336,7 +370,8 @@ class Renderer(nn.Module):
         outputs = torch.cat([rgb, sigma], -1)
         outputs = outputs.reshape(N, S, -1)
 
-        return outputs
+        # semantic = semantic_feat[middle_pts_mask]
+        return outputs, semantic
 
 
 class Semantic_predictor(nn.Module):

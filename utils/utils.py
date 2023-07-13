@@ -361,25 +361,22 @@ def get_sample_points(
     with torch.no_grad():
 
         if target_depth_guidance:
-            depth_cand = []
-            N_rays = rays_o.shape[0]
-            # N_samples = nb_coarse + nb_fine
+
+            N_samples = nb_coarse + nb_fine
             t_vals = torch.linspace(0.0, 1.0, steps=nb_coarse).view(nb_coarse).to(device)
             pts_depth = near * (1.0 - t_vals) + far * (t_vals)
-            for element in rays_depth:
-                element = element.repeat(nb_fine)
-                # std = (torch.min(torch.abs(far-element),torch.abs(element-near)))/3
-                # if (std <= 0).sum() > 0:
-                #     print("non zero or negative std value detected")
-                # currently hard coded std value to 0.5, somehow cannot be set as above
-                x = torch.normal(mean=element,std=0.5)
-                x = torch.cat([pts_depth, x])
-                x1,_ = torch.sort(x)
-                # This is the mean point of the ray, the predicted depth, so at the end of the for loop iteration, it will have 1+N_samples elements
-                depth_cand.append(torch.cat([element[0:1], torch.clamp(x1,min=near,max=far)]))
+            pts_depth = pts_depth.expand([nb_rays, nb_coarse])
+            expand_rays_depth = rays_depth.unsqueeze(1).repeat(1, nb_fine-1)
+            x = torch.normal(mean=expand_rays_depth, std=0.5)
+            x = torch.cat([pts_depth, x, rays_depth.unsqueeze(1)], dim=1)
+            x1, indice = torch.sort(x, dim=1)
+            pts_depth = torch.clamp(x1, min=near, max=far)
 
-            # pts_depth: (N_rays, 1+N_samples)
-            pts_depth=torch.stack(depth_cand)
+            # This could get more than one points at the same depth, using sorted indice could be more stable
+            # middle_pts_mask = torch.eq(pts_depth, rays_depth.unsqueeze(1))
+            
+            # The last one is the predicted depth
+            middle_pts_mask = (indice == (N_samples - 1))
 
             ##### RC-MVSNet use this, but not sure why. Comment it out for now
             # half_N_rays = N_rays//2 
@@ -443,7 +440,7 @@ def get_sample_points(
 
             ray_pts = rays_o.unsqueeze(1) + pts_depth.unsqueeze(-1) * rays_d.unsqueeze(1)
 
-        middle_ray_pts_ndc = {"level_0": [], "level_1": [], "level_2": []}
+        # middle_ray_pts_ndc = {"level_0": [], "level_1": [], "level_2": []}
         all_ray_pts_ndc = {"level_0": [], "level_1": [], "level_2": []}
         for idx in range(nb_views):
             w2c_ref, intrinsic_ref = w2cs[0, idx], intrinsics[0, idx]
@@ -455,16 +452,16 @@ def get_sample_points(
                         W_H,
                         depth_values=depth_values[f"level_{l}"][:, idx],
                     )
-                    middle_ray_pts_ndc[f"level_{l}"].append(ray_pts_ndc[:,:1])
-                    all_ray_pts_ndc[f"level_{l}"].append(ray_pts_ndc[:,1:])
+                    # middle_ray_pts_ndc[f"level_{l}"].append(ray_pts_ndc[:,:1])
+                    all_ray_pts_ndc[f"level_{l}"].append(ray_pts_ndc)
         for l in range(3):
-            middle_ray_pts_ndc[f"level_{l}"] = torch.stack(middle_ray_pts_ndc[f"level_{l}"], dim=2)
+            # middle_ray_pts_ndc[f"level_{l}"] = torch.stack(middle_ray_pts_ndc[f"level_{l}"], dim=2)
             all_ray_pts_ndc[f"level_{l}"] = torch.stack(all_ray_pts_ndc[f"level_{l}"], dim=2)
         if torch.isnan(all_ray_pts_ndc["level_0"]).any():
             print("NAN in all_ray_pts_ndc")
-        if torch.isnan(middle_ray_pts_ndc["level_0"]).any():
-            print("NAN in middle_ray_pts_ndc")
-        return pts_depth[:,1:], ray_pts[:,1:], all_ray_pts_ndc, pts_depth[:,:1], ray_pts[:,:1], middle_ray_pts_ndc
+        # if torch.isnan(middle_ray_pts_ndc["level_0"]).any():
+        #     print("NAN in middle_ray_pts_ndc")
+        return pts_depth, ray_pts, all_ray_pts_ndc, middle_pts_mask
 
 
 def get_rays_pts(
@@ -545,7 +542,7 @@ def get_rays_pts(
     
     # travel along the rays
     W_H = torch.tensor([W - 1, H - 1]).to(rays_orig.device)
-    pts_depth, ray_pts, ray_pts_ndc, middle_pts_depth, middle_ray_pts, middle_ray_pts_ndc = get_sample_points(
+    pts_depth, ray_pts, all_ray_pts_ndc, middle_pts_mask = get_sample_points(
         nb_coarse,
         nb_fine,
         near,
@@ -562,12 +559,10 @@ def get_rays_pts(
     )
 
     return (
-        middle_pts_depth,
-        middle_ray_pts,
-        middle_ray_pts_ndc,
+        middle_pts_mask,
         pts_depth,
         ray_pts,
-        ray_pts_ndc,
+        all_ray_pts_ndc,
         rays_dir,
         rays_gt_rgb,
         rays_gt_semantic,
@@ -597,10 +592,11 @@ def interpolate_3D(feats, pts_ndc, padding_mode='border'):
     return features
 
 
-def interpolate_2D(feats, imgs, pts_ndc, padding_mode='border'):
+def interpolate_2D(feats, imgs, semantic_feats, pts_ndc, padding_mode='border'):
     '''
     getting the features and images at the points / a image and feature
     feats: (1,8,256,256)
+    semant: (1,21(number_class),256,256),
     imgs: (1,3,256,256)
     pts_ndc: (4096,128,3)
     return: (4096,128,8), (4096,128,3)
@@ -617,6 +613,13 @@ def interpolate_2D(feats, imgs, pts_ndc, padding_mode='border'):
         .permute(2, 3, 1, 0)
         .squeeze()
     )
+    semantic_features = (
+        F.grid_sample(
+            semantic_feats, grid, align_corners=True, mode="bilinear", padding_mode="zeros"
+        )
+        .permute(2, 3, 1, 0)
+        .squeeze()
+    )
     images = (
         F.grid_sample(
             imgs, grid, align_corners=True, mode="bilinear", padding_mode=padding_mode
@@ -628,7 +631,7 @@ def interpolate_2D(feats, imgs, pts_ndc, padding_mode='border'):
         in_mask = (grid > -1.0) * (grid < 1.0) # (1,4096,128,2)
         in_mask = (in_mask[..., 0] * in_mask[..., 1]).float().permute(1, 2, 0) # (4096,128,1)
 
-    return features, images, in_mask
+    return features, images, semantic_features, in_mask
 
 
 def read_pfm(filename):

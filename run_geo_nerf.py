@@ -64,15 +64,16 @@ class GeoNeRF(LightningModule):
 
         # Create geometry_reasoner and renderer models
         self.geo_reasoner = CasMVSNet(use_depth=hparams.use_depth, nb_class=hparams.nb_class).cuda()
-        self.renderer = Renderer(nb_samples_per_ray=hparams.nb_coarse + hparams.nb_fine).cuda()
-        self.semantic_net = Semantic_predictor(nb_view=hparams.nb_views, nb_class=hparams.nb_class).cuda()
+        self.renderer = Renderer(nb_samples_per_ray=hparams.nb_coarse + hparams.nb_fine, nb_view=hparams.nb_views, nb_class=hparams.nb_class).cuda()
+        # self.semantic_net = Semantic_predictor(nb_view=hparams.nb_views, nb_class=hparams.nb_class).cuda()
         if hparams.target_depth_estimation & hparams.use_depth_refine_net:
             self.depth_refine_net = UNet(in_channels=1, out_channels=1).cuda()
 
         self.eval_metric = [0.01, 0.05, 0.1]
         # self.miou = JaccardIndex(task="multiclass",num_classes=hparams.nb_class, ignore_index=0)
         # self.miou = calculate_segmentation_metrics
-        self.miou = IoU(num_classes=hparams.nb_class, ignore_label=hparams.ignore_label)
+        # here might -1 because of ignore_label should not calculate
+        self.miou = IoU(num_classes=hparams.nb_class-1, ignore_label=hparams.ignore_label)
         self.automatic_optimization = False
         self.save_hyperparameters()
 
@@ -103,13 +104,13 @@ class GeoNeRF(LightningModule):
 
         if self.hparams.target_depth_estimation & self.hparams.use_depth_refine_net:
             opt = torch.optim.Adam(
-                list(self.geo_reasoner.parameters()) + list(self.renderer.parameters()) + list(self.semantic_net.parameters()) + list(self.depth_refine_net.parameters()),
+                list(self.geo_reasoner.parameters()) + list(self.renderer.parameters()) + list(self.depth_refine_net.parameters()),
                 lr=self.learning_rate,
                 betas=(0.9, 0.999),
             )
         else:
             opt = torch.optim.Adam(
-                list(self.geo_reasoner.parameters()) + list(self.renderer.parameters()) + list(self.semantic_net.parameters()),
+                list(self.geo_reasoner.parameters()) + list(self.renderer.parameters()),
                 lr=self.learning_rate,
                 betas=(0.9, 0.999),
             )
@@ -191,9 +192,7 @@ class GeoNeRF(LightningModule):
             target_depth_estimation = None
 
         (
-            middle_pts_depth,
-            middle_ray_pts,
-            middle_ray_pts_ndc,
+            middle_pts_mask,
             pts_depth,
             rays_pts,
             rays_pts_ndc,
@@ -237,10 +236,11 @@ class GeoNeRF(LightningModule):
             imgs=unpre_imgs[:, :nb_views],
             depth_map_norm=depth_map_norm,
             renderer_net=self.renderer,
-            middle_ray_pts=middle_ray_pts,
-            middle_ray_pts_ndc=middle_ray_pts_ndc,
-            middle_pts_depth=middle_pts_depth,
-            semantic_net=self.semantic_net,
+            middle_pts_mask=middle_pts_mask,
+            # middle_ray_pts=middle_ray_pts,
+            # middle_ray_pts_ndc=middle_ray_pts_ndc,
+            # middle_pts_depth=middle_pts_depth,
+            # semantic_net=self.semantic_net,
             semantic_feat=semantic_feats,
         )
 
@@ -325,7 +325,10 @@ class GeoNeRF(LightningModule):
         if torch.isnan(mse_loss):
             print("Nan mse loss encountered, skipping batch...")
         # loss = loss + mse_loss + croos_entropy_loss*0.1
-        loss = loss + mse_loss + croos_entropy_loss*0.2 + semantic_logits_loss*0.2
+        if self.global_step < 80000:
+            loss = loss + mse_loss + semantic_logits_loss*0.2
+        else:
+            loss = loss + mse_loss + croos_entropy_loss*0.2 + semantic_logits_loss*0.2
         # loss = loss + mse_loss + croos_entropy_loss*0.1 + semantic_logits_loss*0.1 + target_depth_loss
         # loss = mse_loss + croos_entropy_loss*0.01
         if torch.isnan(loss):
@@ -382,9 +385,6 @@ class GeoNeRF(LightningModule):
             opt.zero_grad()
 
             del target_depth_estimation, rendered_depth, rendered_rgb, rendered_semantic, rays_gt_depth, rays_gt_rgb, rays_gt_semantic, rays_pixs
-            del middle_pts_depth, middle_ray_pts, middle_ray_pts_ndc
-
-            
 
             return {"loss": loss}
 
@@ -458,7 +458,7 @@ class GeoNeRF(LightningModule):
             for chunk_idx in range(
                 H * W // self.hparams.chunk + int(H * W % self.hparams.chunk > 0)
             ):
-                middle_pts_depth, middle_ray_pts, middle_ray_pts_ndc, pts_depth, rays_pts, rays_pts_ndc, rays_dir, _, _, _, _ = get_rays_pts(
+                middle_pts_mask, pts_depth, rays_pts, rays_pts_ndc, rays_dir, _, _, _, _ = get_rays_pts(
                     H,
                     W,
                     batch["c2ws"],
@@ -488,10 +488,11 @@ class GeoNeRF(LightningModule):
                     imgs=unpre_imgs[:, :nb_views],
                     depth_map_norm=depth_map_norm,
                     renderer_net=self.renderer,
-                    middle_ray_pts=middle_ray_pts,
-                    middle_ray_pts_ndc=middle_ray_pts_ndc,
-                    middle_pts_depth=middle_pts_depth,
-                    semantic_net=self.semantic_net,
+                    middle_pts_mask=middle_pts_mask,
+                    # middle_ray_pts=middle_ray_pts,
+                    # middle_ray_pts_ndc=middle_ray_pts_ndc,
+                    # middle_pts_depth=middle_pts_depth,
+                    # semantic_net=self.semantic_net,
                     semantic_feat=semantic_feats,
                 )
                 rendered_rgb.append(rend_rgb)
@@ -731,7 +732,6 @@ class GeoNeRF(LightningModule):
             self.wr_cntr += 1
         self.validation_step_outputs.append(loss)
         del target_depth_estimation, rendered_depth, rendered_rgb, rendered_semantic
-        del middle_pts_depth, middle_ray_pts, middle_ray_pts_ndc
         return loss
 
     def on_validation_epoch_end(self):
@@ -742,6 +742,8 @@ class GeoNeRF(LightningModule):
         mean_psnr = torch.stack([x["val_psnr"] for x in outputs]).mean()
         if self.hparams.segmentation:
             mean_miou = torch.stack([x["val_miou"] for x in outputs]).mean()
+            mean_acc = torch.stack([x["val_acc"] for x in outputs]).mean()
+            mean_class_acc = torch.stack([x["val_class_acc"] for x in outputs]).mean()
         mean_ssim = np.stack([x["val_ssim"] for x in outputs]).mean()
         mean_lpips = np.stack([x["val_lpips"] for x in outputs]).mean()
         mask_sum = torch.stack([x["mask_sum"] for x in outputs]).sum()
@@ -765,6 +767,8 @@ class GeoNeRF(LightningModule):
         self.log("val/LPIPS", mean_lpips, prog_bar=False)
         if self.hparams.segmentation:
             self.log("val/mIoU", mean_miou, prog_bar=False)
+            self.log("val/m_acc", mean_acc, prog_bar=False)
+            self.log("val/m_class_acc", mean_class_acc, prog_bar=False)
         if mask_sum > 0:
             self.log("val/d_loss_r", mean_d_loss_r, prog_bar=False)
             self.log("val/abs_err", mean_abs_err, prog_bar=False)
@@ -835,6 +839,7 @@ if __name__ == "__main__":
     # args.use_amp = False if args.eval else True
     args.use_amp = False 
     trainer = Trainer(
+        accelerator="gpu", devices=[1],
         max_steps=args.num_steps,
         callbacks=[checkpoint_callback],
         logger=logger,
