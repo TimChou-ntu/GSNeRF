@@ -53,6 +53,8 @@ def config_parser():
     parser.add_argument("--lrate", type=float, default=5e-4, help="Learning rate")
     parser.add_argument("--warmup_steps", type=int, default=500, help="Gradually warm-up learning rate in optimizer")
     parser.add_argument("--scene", type=str, default="None", help="Scene for fine-tuning")
+    parser.add_argument("--cross_entropy_weight", type=float, default=0.1, help="Weight for cross entropy loss")
+    parser.add_argument("--optimizer", type=str, default="adam", help="select optimizer: adam / sgd")
 
     # Rendering options
     parser.add_argument("--chunk", type=int, default=4096, help="Number of rays rendered in parallel")

@@ -82,6 +82,7 @@ class UNet(nn.Module):
         self.down1 = (Down(8, 16))
         self.down2 = (Down(16, 32))
         self.down3 = (Down(32, 64))
+        # TODO: down four times might be too much
         self.down4 = (Down(64, 128 ))
         self.up1 = (Up(128, 64 , bilinear))
         self.up2 = (Up(64, 32 , bilinear))

@@ -190,6 +190,7 @@ class ScannetDatabase(BaseDatabase):
 def parse_database_name(database_name, root_dir) -> BaseDatabase:
     name2database = {
         'scannet': ScannetDatabase,
+        'replica': ReplicaDatabase,
     }
     database_type = database_name.split('/')[0]
     if database_type in name2database:
@@ -413,3 +414,108 @@ def imgs_info_slice(imgs_info, indices):
     for k, v in imgs_info.items():
         imgs_info_out[k] = v[indices]
     return imgs_info_out
+
+
+class ReplicaDatabase(BaseDatabase):
+    def __init__(self, database_name):
+        super().__init__(database_name)
+        _, self.scene_name, self.seq_id, background_size = database_name.split('/')
+        background, image_size = background_size.split('_')
+        self.image_size = int(image_size)
+        self.background = background
+        self.root_dir = f'data/replica/{self.scene_name}/{self.seq_id}'
+        self.ratio = self.image_size / 640
+        self.h, self.w = int(self.ratio*480), int(self.image_size)
+
+        rgb_paths = [x for x in glob.glob(os.path.join(
+            self.root_dir, "rgb", "*")) if (x.endswith(".jpg") or x.endswith(".png"))]
+        self.rgb_paths = natsorted(rgb_paths)
+        # DO NOT use sorted() here!!! it will sort the name in a wrong way since the name is like rgb_1.jpg
+
+        depth_paths = [x for x in glob.glob(os.path.join(
+            self.root_dir, "depth", "*")) if (x.endswith(".jpg") or x.endswith(".png"))]
+        self.depth_paths = natsorted(depth_paths)
+
+        label_paths = [x for x in glob.glob(os.path.join(
+            self.root_dir, "semantic_class", "*")) if (x.endswith(".jpg") or x.endswith(".png"))]
+        self.label_paths = natsorted(label_paths)
+
+        # Replica camera intrinsics
+        # Pinhole Camera Model
+        fx, fy, cx, cy, s = 320.0, 320.0, 319.5, 229.5, 0.0
+        if self.ratio != 1.0:
+            fx, fy, cx, cy = fx * self.ratio, fy * self.ratio, cx * self.ratio, cy * self.ratio
+        self.K = np.array([[fx, s, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
+        c2ws = np.loadtxt(f'{self.root_dir}/traj_w_c.txt',
+                          delimiter=' ').reshape(-1, 4, 4).astype(np.float32)
+        self.poses = []
+        transf = np.diag(np.asarray([1, -1, -1]))
+        num_poses = c2ws.shape[0]
+        for i in range(num_poses):
+            pose = c2ws[i][:3]
+            # Change the pose to OpenGL coordinate system
+            # TODO: check if this is correct, our code is using OpenCV coordinate system
+            # pose = transf @ pose
+            pose = pose_inverse(pose)
+            self.poses.append(pose)
+
+        self.img_ids = []
+        for i, rgb_path in enumerate(self.rgb_paths):
+            self.img_ids.append(i)
+
+        self.label_mapping = PointSegClassMapping(
+            valid_cat_ids=[
+                3, 7, 8, 10, 11, 12, 13, 14, 15, 16,
+                17, 18, 19, 20, 22, 23, 26, 29, 31,
+                34, 35, 37, 40, 44, 47, 52, 54, 56,
+                59, 60, 61, 62, 63, 64, 65, 70, 71,
+                76, 78, 79, 80, 82, 83, 87, 88, 91,
+                92, 93, 95, 97, 98
+            ],
+            max_cat_id=101
+        )
+
+    def get_image(self, img_id):
+        img = imread(self.rgb_paths[img_id])
+        if self.w != 640:
+            img = cv2.resize(downsample_gaussian_blur(
+                img, self.ratio), (self.w, self.h), interpolation=cv2.INTER_LINEAR)
+        return img
+
+    def get_K(self, img_id):
+        return self.K
+
+    def get_pose(self, img_id):
+        pose = self.poses[img_id]
+        return pose.copy()
+
+    def get_img_ids(self, check_depth_exist=False):
+        return self.img_ids
+
+    def get_bbox(self, img_id):
+        raise NotImplementedError
+
+    def get_depth(self, img_id):
+        h, w, _ = self.get_image(img_id).shape
+        img = Image.open(self.depth_paths[img_id])
+        depth = np.asarray(img, dtype=np.float32) / 1000.0  # mm to m
+        depth = np.ascontiguousarray(depth, dtype=np.float32)
+        depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_NEAREST)
+        return depth
+
+    def get_mask(self, img_id):
+        h, w, _ = self.get_image(img_id).shape
+        return np.ones([h, w], bool)
+
+    def get_depth_range(self, img_id):
+        return np.asarray((0.1, 6.0), np.float32)
+
+    def get_label(self, img_id):
+        h, w, _ = self.get_image(img_id).shape
+        img = Image.open(self.label_paths[img_id])
+        label = np.asarray(img, dtype=np.int32)
+        label = np.ascontiguousarray(label)
+        label = cv2.resize(label, (w, h), interpolation=cv2.INTER_NEAREST)
+        label = label.astype(np.int32)
+        return self.label_mapping(label)
+

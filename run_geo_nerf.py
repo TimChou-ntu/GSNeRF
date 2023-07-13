@@ -37,6 +37,7 @@ from utils.utils import (
     seed_everything,
     lable_color_map,
 )
+from utils.optimizer import get_optimizer, get_scheduler
 from utils.options import config_parser
 from utils.depth_map import get_target_view_depth
 from data.get_datasets import (
@@ -100,21 +101,13 @@ class GeoNeRF(LightningModule):
             self.val_dataset = get_validation_dataset(self.hparams)
 
     def configure_optimizers(self):
-        eps = 1e-5
-
         if self.hparams.target_depth_estimation & self.hparams.use_depth_refine_net:
-            opt = torch.optim.Adam(
-                list(self.geo_reasoner.parameters()) + list(self.renderer.parameters()) + list(self.depth_refine_net.parameters()),
-                lr=self.learning_rate,
-                betas=(0.9, 0.999),
-            )
+            opt = get_optimizer(self.hparams, [self.geo_reasoner, self.renderer, self.depth_refine_net])
+            
         else:
-            opt = torch.optim.Adam(
-                list(self.geo_reasoner.parameters()) + list(self.renderer.parameters()),
-                lr=self.learning_rate,
-                betas=(0.9, 0.999),
-            )
-        sch = CosineAnnealingLR(opt, T_max=self.hparams.num_steps, eta_min=eps)
+            opt = get_optimizer(self.hparams, [self.geo_reasoner, self.renderer])
+            
+        sch = get_scheduler(self.hparams, optimizer=opt)
 
         return [opt], [sch]
 
@@ -325,10 +318,10 @@ class GeoNeRF(LightningModule):
         if torch.isnan(mse_loss):
             print("Nan mse loss encountered, skipping batch...")
         # loss = loss + mse_loss + croos_entropy_loss*0.1
-        if self.global_step < 80000:
-            loss = loss + mse_loss + semantic_logits_loss*0.2
-        else:
-            loss = loss + mse_loss + croos_entropy_loss*0.2 + semantic_logits_loss*0.2
+        # if self.global_step < 80000:
+        #     loss = loss + mse_loss + semantic_logits_loss*0.2
+        # else:
+        loss = loss + mse_loss + croos_entropy_loss*self.hparams["cross_entropy_weight"] + semantic_logits_loss*self.hparams["cross_entropy_weight"]
         # loss = loss + mse_loss + croos_entropy_loss*0.1 + semantic_logits_loss*0.1 + target_depth_loss
         # loss = mse_loss + croos_entropy_loss*0.01
         if torch.isnan(loss):
@@ -839,7 +832,7 @@ if __name__ == "__main__":
     # args.use_amp = False if args.eval else True
     args.use_amp = False 
     trainer = Trainer(
-        accelerator="gpu", devices=[1],
+        accelerator="gpu",
         max_steps=args.num_steps,
         callbacks=[checkpoint_callback],
         logger=logger,
