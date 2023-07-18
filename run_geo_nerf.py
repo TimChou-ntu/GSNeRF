@@ -65,7 +65,9 @@ class GeoNeRF(LightningModule):
 
         # Create geometry_reasoner and renderer models
         self.geo_reasoner = CasMVSNet(use_depth=hparams.use_depth, nb_class=hparams.nb_class).cuda()
-        self.renderer = Renderer(nb_samples_per_ray=hparams.nb_coarse + hparams.nb_fine, nb_view=hparams.nb_views, nb_class=hparams.nb_class).cuda()
+        self.renderer = Renderer(nb_samples_per_ray=hparams.nb_coarse + hparams.nb_fine, 
+                                 nb_view=hparams.nb_views, nb_class=hparams.nb_class, 
+                                 only_using_semantic_global_tokens=hparams.only_using_semantic_global_tokens).cuda()
         # self.semantic_net = Semantic_predictor(nb_view=hparams.nb_views, nb_class=hparams.nb_class).cuda()
         if hparams.target_depth_estimation & hparams.use_depth_refine_net:
             self.depth_refine_net = UNet(in_channels=1, out_channels=1).cuda()
@@ -734,9 +736,15 @@ class GeoNeRF(LightningModule):
         outputs = self.validation_step_outputs
         mean_psnr = torch.stack([x["val_psnr"] for x in outputs]).mean()
         if self.hparams.segmentation:
+            val_results = {}
             mean_miou = torch.stack([x["val_miou"] for x in outputs]).mean()
             mean_acc = torch.stack([x["val_acc"] for x in outputs]).mean()
             mean_class_acc = torch.stack([x["val_class_acc"] for x in outputs]).mean()
+            val_results["val_miou"] = torch.stack([x["val_miou"] for x in outputs]).reshape(-1, 10).mean(0).tolist()
+            val_results["val_acc"] = torch.stack([x["val_acc"] for x in outputs]).reshape(-1, 10).mean(0).tolist()
+            val_results["val_class_acc"] = torch.stack([x["val_class_acc"] for x in outputs]).reshape(-1, 10).mean(0).tolist()
+            with open(os.path.join(self.hparams.logdir,self.hparams.dataset_name,self.hparams.expname,'val_results.json'), 'w') as f:
+                f.write(str(val_results).replace('\'', '\"'))
         mean_ssim = np.stack([x["val_ssim"] for x in outputs]).mean()
         mean_lpips = np.stack([x["val_lpips"] for x in outputs]).mean()
         mask_sum = torch.stack([x["mask_sum"] for x in outputs]).sum()

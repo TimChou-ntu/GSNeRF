@@ -223,11 +223,12 @@ class EncoderLayer(nn.Module):
 
 
 class Renderer(nn.Module):
-    def __init__(self, nb_samples_per_ray, nb_view=8, nb_class=21):
+    def __init__(self, nb_samples_per_ray, nb_view=8, nb_class=21, only_using_semantic_global_tokens=True):
         super(Renderer, self).__init__()
 
         self.nb_view = nb_view
         self.nb_class = nb_class
+        self.only_using_semantic_global_tokens = only_using_semantic_global_tokens
         self.dim = 32
 
         self.semantic_token_gen = nn.Linear(1 + self.nb_class, self.dim)
@@ -254,7 +255,11 @@ class Renderer(nn.Module):
             ]
         )
 
-        self.semantic_dim = self.dim
+        # +1 because we add the mean and variance of input features as global features
+        if only_using_semantic_global_tokens:
+            self.semantic_dim = self.dim
+        else:
+            self.semantic_dim = self.dim * (nb_view + 1)
 
         self.semantic_fc1 = nn.Linear(self.semantic_dim, self.semantic_dim)
         self.semantic_fc2 = nn.Linear(self.semantic_dim, self.semantic_dim // 2)
@@ -355,7 +360,10 @@ class Renderer(nn.Module):
         # sigma shape (N_rays*N_points, 1)
         sigma = torch.relu(self.sigma_fc3(sigma_tokens_[:, 0]))
 
-        semantic_global_tokens = semantic_tokens[:, -1:]
+        if self.only_using_semantic_global_tokens:
+            semantic_global_tokens = semantic_tokens[:, -1:]
+        else:
+            semantic_global_tokens = semantic_tokens.reshape(-1, self.semantic_dim)
         semantic_tokens_ = F.elu(self.semantic_fc1(semantic_global_tokens))
         semantic_tokens_ = F.elu(self.semantic_fc2(semantic_tokens_))
         semantic_tokens_ = torch.relu(self.semantic_fc3(semantic_tokens_))

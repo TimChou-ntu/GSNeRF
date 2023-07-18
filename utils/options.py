@@ -73,6 +73,7 @@ def config_parser():
     parser.add_argument("--val_save_img_type", default=["target"], action="append", help="choices=[target, depth, source], Save target comparison images or depth maps or source images")
     parser.add_argument("--target_depth_estimation", action="store_true", help="Use target depth estimation in rendering process")
     parser.add_argument("--use_depth_refine_net", action="store_true", help="Use depth refine net before rendering process")
+    parser.add_argument("--only_using_semantic_global_tokens", type=int, default=0, help="Use only semantic global tokens in rendering process. 0: not use, 1: use")
 
     # resume options
     parser.add_argument("--ckpt_path", type=str, default=None, help="Path to a checkpoint to resume training")
