@@ -70,7 +70,7 @@ class GeoNeRF(LightningModule):
                                  only_using_semantic_global_tokens=hparams.only_using_semantic_global_tokens).cuda()
         # self.semantic_net = Semantic_predictor(nb_view=hparams.nb_views, nb_class=hparams.nb_class).cuda()
         if hparams.target_depth_estimation & hparams.use_depth_refine_net:
-            self.depth_refine_net = UNet(in_channels=1, out_channels=1).cuda()
+            self.depth_refine_net = UNet(n_channels=1, n_classes=1).cuda()
 
         self.eval_metric = [0.01, 0.05, 0.1]
         # self.miou = JaccardIndex(task="multiclass",num_classes=hparams.nb_class, ignore_index=0)
@@ -179,7 +179,9 @@ class GeoNeRF(LightningModule):
             
             if self.hparams.target_depth_estimation & self.hparams.use_depth_refine_net:
                 target_depth_estimation = self.depth_refine_net(target_depth_estimation.unsqueeze(0).unsqueeze(0))['logits'].squeeze()
-
+                near, far = batch["near_fars"][0, -1, 0], batch["near_fars"][0, -1, 1]  ## near/far of the target view
+                target_depth_estimation = torch.nn.functional.sigmoid(target_depth_estimation)*(far-near)+near
+                
             # target_depth_estimation = torch.ones_like(depth_map["level_0"][0, 0]).to("cuda")
             if torch.isnan(target_depth_estimation).any():
                 print("nan in target depth estimation")
@@ -446,6 +448,8 @@ class GeoNeRF(LightningModule):
 
                 if self.hparams.target_depth_estimation & self.hparams.use_depth_refine_net:
                     target_depth_estimation = self.depth_refine_net(target_depth_estimation.unsqueeze(0).unsqueeze(0))['logits'].squeeze()
+                    near, far = batch["near_fars"][0, -1, 0], batch["near_fars"][0, -1, 1]  ## near/far of the target view
+                    target_depth_estimation = torch.nn.functional.sigmoid(target_depth_estimation)*(far-near)+near
             else:
                 target_depth_estimation = None
 
