@@ -744,11 +744,14 @@ class GeoNeRF(LightningModule):
             mean_miou = torch.stack([x["val_miou"] for x in outputs]).mean()
             mean_acc = torch.stack([x["val_acc"] for x in outputs]).mean()
             mean_class_acc = torch.stack([x["val_class_acc"] for x in outputs]).mean()
-            val_results["val_miou"] = torch.stack([x["val_miou"] for x in outputs]).reshape(-1, 10).mean(0).tolist()
-            val_results["val_acc"] = torch.stack([x["val_acc"] for x in outputs]).reshape(-1, 10).mean(0).tolist()
-            val_results["val_class_acc"] = torch.stack([x["val_class_acc"] for x in outputs]).reshape(-1, 10).mean(0).tolist()
-            with open(os.path.join(self.hparams.logdir,self.hparams.dataset_name,self.hparams.expname,'val_results.json'), 'w') as f:
-                f.write(str(val_results).replace('\'', '\"'))
+            try:
+                val_results["val_miou"] = torch.stack([x["val_miou"] for x in outputs]).reshape(-1, 10).mean(0).tolist()
+                val_results["val_acc"] = torch.stack([x["val_acc"] for x in outputs]).reshape(-1, 10).mean(0).tolist()
+                val_results["val_class_acc"] = torch.stack([x["val_class_acc"] for x in outputs]).reshape(-1, 10).mean(0).tolist()
+                with open(os.path.join(self.hparams.logdir,self.hparams.dataset_name,self.hparams.expname,'val_results.json'), 'w') as f:
+                    f.write(str(val_results).replace('\'', '\"'))
+            except:
+                pass
         mean_ssim = np.stack([x["val_ssim"] for x in outputs]).mean()
         mean_lpips = np.stack([x["val_lpips"] for x in outputs]).mean()
         mask_sum = torch.stack([x["mask_sum"] for x in outputs]).sum()
