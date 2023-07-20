@@ -55,6 +55,8 @@ def config_parser():
     parser.add_argument("--scene", type=str, default="None", help="Scene for fine-tuning")
     parser.add_argument("--cross_entropy_weight", type=float, default=0.1, help="Weight for cross entropy loss")
     parser.add_argument("--optimizer", type=str, default="adam", help="select optimizer: adam / sgd")
+    parser.add_argument("--background_weight", type=float, default=0.3, help="Weight for background class in cross entropy loss")
+    parser.add_argument("--two_stage_training_steps", type=int, default=60000, help="Use two stage training, indicating how many steps for first stage")
 
     # Rendering options
     parser.add_argument("--chunk", type=int, default=4096, help="Number of rays rendered in parallel")
@@ -73,6 +75,7 @@ def config_parser():
     parser.add_argument("--val_save_img_type", default=["target"], action="append", help="choices=[target, depth, source], Save target comparison images or depth maps or source images")
     parser.add_argument("--target_depth_estimation", action="store_true", help="Use target depth estimation in rendering process")
     parser.add_argument("--use_depth_refine_net", action="store_true", help="Use depth refine net before rendering process")
+    parser.add_argument("--using_semantic_global_tokens", type=int, default=0, help="Use only semantic global tokens in rendering process. 0: not use, 1: use")
     parser.add_argument("--only_using_semantic_global_tokens", type=int, default=0, help="Use only semantic global tokens in rendering process. 0: not use, 1: use")
 
     # resume options

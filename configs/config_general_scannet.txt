@@ -1,5 +1,5 @@
 ### INPUT
-expname = 0710_scannet_withdepthloss_withsemanticfeatloss_semanticnetwasntinoptimizer_semanticfeatnotlogits
+expname = 0719_depth_refine_weightedcross_twostage
 logdir = ./logs_scannet/
 nb_views = 8
 
@@ -7,18 +7,26 @@ nb_views = 8
 nb_class = 21
 ignore_label = 20
 
+## model
+using_semantic_global_tokens = 1
+only_using_semantic_global_tokens = 0
+use_depth_refine_net = True
+
 ## dataset
 dataset_name = scannet
 scannet_path = "/mnt/sdb/timothy/Desktop/2023Spring/Semantic-Ray/data/scannet"
 scene = None
-val_set_list = "configs/lists/scannetv2_test_split.txt"
+val_set_list = "configs/lists/scannetv2_test_split_old.txt"
 
 ### TESTING
 chunk = 4096  ### Reduce it to save memory
 
 ### TRAINING
 ### num_steps = 250000
-num_steps = 600000
+num_steps = 300000
 lrate = 0.0005
 logger = wandb
 batch_size = 1024
+two_stage_training_steps = 60000
+cross_entropy_weight = 0.5
+background_weight = 0.1

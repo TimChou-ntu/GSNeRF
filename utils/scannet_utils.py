@@ -149,8 +149,10 @@ class ScannetDatabase(BaseDatabase):
         return self.K.astype(np.float32)
 
     def get_pose(self, img_id):
+        transf = np.diag(np.asarray([1, -1, -1, 1]))
         pose = np.loadtxt(
             f'{self.root_dir}/pose/{int(img_id)}.txt').reshape([4, 4])
+        pose = transf @ pose
         # c2w in files, change to w2c
         # pose = pose_inverse(pose)
         return pose.copy()

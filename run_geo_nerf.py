@@ -57,16 +57,20 @@ class GeoNeRF(LightningModule):
         self.wr_cntr = 0
 
         self.depth_loss = SL1Loss()
-        # self.semantic_loss = torch.nn.CrossEntropyLoss()
-        self.semantic_loss = SemanticLoss(nb_class=hparams.nb_class, ignore_label=hparams.ignore_label)
-        self.semantic_feat_loss = nn.CrossEntropyLoss(ignore_index=hparams.ignore_label)
+        # (0: wall, 1: floor, 20: invalid)
+        # 20 + 1 classes cause unbalanced data
+        weights = [hparams.background_weight, hparams.background_weight] + [1.0] * (hparams.nb_class - 3) + [hparams.background_weight]
+        class_weights = torch.FloatTensor(weights).cuda()
+        self.semantic_loss = SemanticLoss(nb_class=hparams.nb_class, ignore_label=hparams.ignore_label, weight=class_weights)
+        self.semantic_feat_loss = nn.CrossEntropyLoss(ignore_index=hparams.ignore_label, weight=class_weights)
         self.target_depth_loss = nn.SmoothL1Loss(reduction="mean")
         self.learning_rate = hparams.lrate
 
         # Create geometry_reasoner and renderer models
         self.geo_reasoner = CasMVSNet(use_depth=hparams.use_depth, nb_class=hparams.nb_class).cuda()
         self.renderer = Renderer(nb_samples_per_ray=hparams.nb_coarse + hparams.nb_fine, 
-                                 nb_view=hparams.nb_views, nb_class=hparams.nb_class, 
+                                 nb_view=hparams.nb_views, nb_class=hparams.nb_class,
+                                 using_semantic_global_tokens=hparams.using_semantic_global_tokens,
                                  only_using_semantic_global_tokens=hparams.only_using_semantic_global_tokens).cuda()
         # self.semantic_net = Semantic_predictor(nb_view=hparams.nb_views, nb_class=hparams.nb_class).cuda()
         if hparams.target_depth_estimation & hparams.use_depth_refine_net:
@@ -322,10 +326,10 @@ class GeoNeRF(LightningModule):
         if torch.isnan(mse_loss):
             print("Nan mse loss encountered, skipping batch...")
         # loss = loss + mse_loss + croos_entropy_loss*0.1
-        # if self.global_step < 80000:
-        #     loss = loss + mse_loss + semantic_logits_loss*0.2
-        # else:
-        loss = loss + mse_loss + croos_entropy_loss*self.hparams["cross_entropy_weight"] + semantic_logits_loss*self.hparams["cross_entropy_weight"]
+        if self.global_step < self.hparams.two_stage_training_steps:
+            loss = loss + mse_loss + semantic_logits_loss*self.hparams["cross_entropy_weight"]
+        else:
+            loss = loss + mse_loss + croos_entropy_loss*self.hparams["cross_entropy_weight"] + semantic_logits_loss*self.hparams["cross_entropy_weight"]
         # loss = loss + mse_loss + croos_entropy_loss*0.1 + semantic_logits_loss*0.1 + target_depth_loss
         # loss = mse_loss + croos_entropy_loss*0.01
         if torch.isnan(loss):
