@@ -264,7 +264,7 @@ class GeoNeRF(LightningModule):
             # if False:
                 loss = loss + 1 * self.depth_loss(depth_map, batch["depths"])
                 if loss != 0:
-                    self.log("train/dlossgt", loss.item(), prog_bar=False)
+                    self.log("train/dlossgt", loss.item(), prog_bar=False,sync_dist =True)
             else:
                 loss = loss + 0.1 * self_supervision_loss(
                     self.depth_loss,
@@ -279,7 +279,7 @@ class GeoNeRF(LightningModule):
                     batch["w2cs"],
                 )
                 if loss != 0:
-                    self.log("train/dlosspgt", loss.item(), prog_bar=False)
+                    self.log("train/dlosspgt", loss.item(), prog_bar=False,sync_dist =True)
 
         mask = rays_gt_depth > 0
         depth_available = mask.sum() > 0
@@ -295,25 +295,25 @@ class GeoNeRF(LightningModule):
             acc_threshold(
                 rendered_depth, rays_gt_depth, mask, self.eval_metric[0]
             ).mean(),
-            prog_bar=False,
+            prog_bar=False,sync_dist =True
         )
         self.log(
             f"train/acc_l_{self.eval_metric[1]}mm",
             acc_threshold(
                 rendered_depth, rays_gt_depth, mask, self.eval_metric[1]
             ).mean(),
-            prog_bar=False,
+            prog_bar=False,sync_dist =True
         )
         self.log(
             f"train/acc_l_{self.eval_metric[2]}mm",
             acc_threshold(
                 rendered_depth, rays_gt_depth, mask, self.eval_metric[2]
             ).mean(),
-            prog_bar=False,
+            prog_bar=False,sync_dist =True
         )
 
         abs_err = abs_error(rendered_depth, rays_gt_depth, mask).mean()
-        self.log("train/abs_err", abs_err, prog_bar=False)
+        self.log("train/abs_err", abs_err, prog_bar=False,sync_dist =True)
 
         ## Reconstruction loss
         if self.hparams.segmentation:
@@ -359,12 +359,12 @@ class GeoNeRF(LightningModule):
             return None
         else:
             with torch.no_grad():
-                self.log("train/loss", loss.item(), prog_bar=True)
+                self.log("train/loss", loss.item(), prog_bar=True,sync_dist =True)
                 psnr = mse2psnr(mse_loss.detach())
-                self.log("train/PSNR", psnr.item(), prog_bar=False)
-                self.log("train/img_mse_loss", mse_loss.item(), prog_bar=False)
-                self.log("train/semantic_loss", croos_entropy_loss.item(), prog_bar=False)
-                self.log("train/semantic_feats_loss", semantic_logits_loss.item(), prog_bar=False)
+                self.log("train/PSNR", psnr.item(), prog_bar=False,sync_dist =True)
+                self.log("train/img_mse_loss", mse_loss.item(), prog_bar=False,sync_dist =True)
+                self.log("train/semantic_loss", croos_entropy_loss.item(), prog_bar=False,sync_dist =True)
+                self.log("train/semantic_feats_loss", semantic_logits_loss.item(), prog_bar=False,sync_dist =True)
 
             # Manual Optimization
             opt = self.optimizers()
@@ -382,7 +382,7 @@ class GeoNeRF(LightningModule):
                 for pg in opt.param_groups:
                     pg["lr"] = lr_scale * self.learning_rate
 
-            self.log("train/lr", opt.param_groups[0]["lr"], prog_bar=False)
+            self.log("train/lr", opt.param_groups[0]["lr"], prog_bar=False,sync_dist =True)
             
             opt.step()
             sch.step()
@@ -778,19 +778,19 @@ class GeoNeRF(LightningModule):
             / mask_sum
         )
 
-        self.log("val/PSNR", mean_psnr, prog_bar=False)
-        self.log("val/SSIM", mean_ssim, prog_bar=False)
-        self.log("val/LPIPS", mean_lpips, prog_bar=False)
+        self.log("val/PSNR", mean_psnr, prog_bar=False,sync_dist =True)
+        self.log("val/SSIM", mean_ssim, prog_bar=False,sync_dist =True)
+        self.log("val/LPIPS", mean_lpips, prog_bar=False,sync_dist =True)
         if self.hparams.segmentation:
-            self.log("val/mIoU", mean_miou, prog_bar=False)
-            self.log("val/m_acc", mean_acc, prog_bar=False)
-            self.log("val/m_class_acc", mean_class_acc, prog_bar=False)
+            self.log("val/mIoU", mean_miou, prog_bar=False,sync_dist =True)
+            self.log("val/m_acc", mean_acc, prog_bar=False,sync_dist =True)
+            self.log("val/m_class_acc", mean_class_acc, prog_bar=False,sync_dist =True)
         if mask_sum > 0:
-            self.log("val/d_loss_r", mean_d_loss_r, prog_bar=False)
-            self.log("val/abs_err", mean_abs_err, prog_bar=False)
-            self.log(f"val/acc_{self.eval_metric[0]}mm", mean_acc_1mm, prog_bar=False)
-            self.log(f"val/acc_{self.eval_metric[1]}mm", mean_acc_2mm, prog_bar=False)
-            self.log(f"val/acc_{self.eval_metric[2]}mm", mean_acc_4mm, prog_bar=False)
+            self.log("val/d_loss_r", mean_d_loss_r, prog_bar=False,sync_dist =True)
+            self.log("val/abs_err", mean_abs_err, prog_bar=False,sync_dist =True)
+            self.log(f"val/acc_{self.eval_metric[0]}mm", mean_acc_1mm, prog_bar=False,sync_dist =True)
+            self.log(f"val/acc_{self.eval_metric[1]}mm", mean_acc_2mm, prog_bar=False,sync_dist =True)
+            self.log(f"val/acc_{self.eval_metric[2]}mm", mean_acc_4mm, prog_bar=False,sync_dist =True)
 
         with open(
             f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/{self.hparams.expname}_metrics.txt",
