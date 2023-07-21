@@ -865,7 +865,7 @@ if __name__ == "__main__":
         check_val_every_n_epoch=1000 if args.scene != 'None' else 1,
         benchmark=True,
         precision='16-mixed' if args.use_amp else 32,
-        strategy= 'ddp' if args.ddp else 'auto',
+        strategy= 'ddp_find_unused_parameters_true' if args.ddp else 'auto',
     )
 
     if not args.eval:  ## Train

@@ -159,8 +159,12 @@ class smp_UNet(nn.Module):
         return F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=True) + y
 
     def forward(self, x):
-        feature = self.model(x)
-        feat = self.model.encoder(x)
+         feat = self.model.encoder(x)
+
+        feature = self.model.decoder(*feat)
+        feature = self.model.segmentation_head(feature)
+
+        logits = self.projection(feature)
 
         x3 = feat[2]
         x2 = feat[1]
@@ -173,8 +177,6 @@ class smp_UNet(nn.Module):
         # reduce output channels
         feat1 = self.smooth1(feat1)  # (B, 16, H//2, W//2)
         feat0 = self.smooth0(feat0)  # (B, 8, H, W)
-
-        logits = self.projection(feature)
 
         output = {"level_0": feat0, "level_1": feat1, "level_2": feat2, 'logits': logits, 'feature': feature}
                   
