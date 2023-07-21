@@ -332,11 +332,11 @@ class CasMVSNet(nn.Module):
                         gt_mask * (gt_depths - init_depth_min) / (depth_interval_l)
                     )[:, :, None]
                     spikes = (
-                        torch.arange(D).view(1, 1, -1, 1, 1).cuda()
+                        torch.arange(D).view(1, 1, -1, 1, 1).to(gt_mask.device)
                         == sp_idx_float.floor().long()
                     ) * (1 - sp_idx_float.frac())
                     spikes = spikes + (
-                        torch.arange(D).view(1, 1, -1, 1, 1).cuda()
+                        torch.arange(D).view(1, 1, -1, 1, 1).to(gt_mask.device)
                         == sp_idx_float.ceil().long()
                     ) * (sp_idx_float.frac())
                     spikes = (spikes * gt_mask[:, :, None]).float()
@@ -409,7 +409,6 @@ class CasMVSNet(nn.Module):
         depth_values = {"level_0": [], "level_1": [], "level_2": []}
         ## Create cost volumes for each view
         for i in range(0, V):
-            # permuted_idx = torch.tensor(closest_idxs[0, i]).cuda()
             permuted_idx = closest_idxs[0, i].clone().detach().to(feats['level_0'].device)
             # if near_far.sum() == 0:
             #     init_depth_min = 1

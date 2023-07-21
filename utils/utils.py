@@ -129,7 +129,7 @@ def self_supervision_loss(
 ):
     loss = 0
     target_points = torch.stack(
-        [rays_pixs[1], rays_pixs[0], torch.ones(rays_pixs[0].shape[0]).cuda()], dim=-1
+        [rays_pixs[1], rays_pixs[0], torch.ones(rays_pixs[0].shape[0]).to(rays_pixs.device)], dim=-1
     )
     target_points = rendered_depth.view(-1, 1) * (
         target_points @ torch.inverse(intrinsics[0, -1]).t()
@@ -167,12 +167,12 @@ def self_supervision_loss(
         higher_b = pixel_coor + (k // 2)
 
         ind_h = (
-            lower_b[:, 1:] * torch.arange(k - 1, -1, -1).view(1, -1).cuda()
-            + higher_b[:, 1:] * torch.arange(0, k).view(1, -1).cuda()
+            lower_b[:, 1:] * torch.arange(k - 1, -1, -1).view(1, -1).to(lower_b.device)
+            + higher_b[:, 1:] * torch.arange(0, k).view(1, -1).to(lower_b.device)
         ) // (k - 1)
         ind_w = (
-            lower_b[:, 0:1] * torch.arange(k - 1, -1, -1).view(1, -1).cuda()
-            + higher_b[:, 0:1] * torch.arange(0, k).view(1, -1).cuda()
+            lower_b[:, 0:1] * torch.arange(k - 1, -1, -1).view(1, -1).to(lower_b.device)
+            + higher_b[:, 0:1] * torch.arange(0, k).view(1, -1).to(lower_b.device)
         ) // (k - 1)
 
         patches_h = torch.gather(
@@ -592,7 +592,7 @@ def interpolate_3D(feats, pts_ndc, padding_mode='border'):
     return features
 
 
-def interpolate_2D(feats, imgs, semantic_feats, pts_ndc, padding_mode='border'):
+def interpolate_2D(feats, imgs, semantic_feats, pts_ndc, padding_mode='border', use_batch_semantic_features=False):
     '''
     getting the features and images at the points / a image and feature
     feats: (1,8,256,256)
@@ -613,13 +613,7 @@ def interpolate_2D(feats, imgs, semantic_feats, pts_ndc, padding_mode='border'):
         .permute(2, 3, 1, 0)
         .squeeze()
     )
-    semantic_features = (
-        F.grid_sample(
-            semantic_feats, grid, align_corners=True, mode="bilinear", padding_mode="zeros"
-        )
-        .permute(2, 3, 1, 0)
-        .squeeze()
-    )
+
     images = (
         F.grid_sample(
             imgs, grid, align_corners=True, mode="bilinear", padding_mode=padding_mode
@@ -627,6 +621,34 @@ def interpolate_2D(feats, imgs, semantic_feats, pts_ndc, padding_mode='border'):
         .permute(2, 3, 1, 0)
         .squeeze()
     )
+    if use_batch_semantic_features:
+        feats_size = np.array(feats.shape[-2:], dtype=np.int32)
+        semantic_feature_batch_size = 1
+        semantic_feature_batch_size_ = (semantic_feature_batch_size / feats_size) * 2
+        ys, xs = torch.meshgrid(
+            semantic_feature_batch_size_[0]*torch.linspace(-semantic_feature_batch_size, semantic_feature_batch_size, 2*semantic_feature_batch_size+1), 
+            semantic_feature_batch_size_[1]*torch.linspace(-semantic_feature_batch_size, semantic_feature_batch_size, 2*semantic_feature_batch_size+1), 
+            indexing="ij"
+        )
+        batch_shift = torch.stack([xs.reshape(-1), ys.reshape(-1)], dim=-1).to(grid.device)
+        batch_grid = grid.unsqueeze(-2).repeat(1,1,1,9,1) + batch_shift
+        # grid size: (1, 4096, 128*9, 2)
+        batch_grid = batch_grid.view(grid.shape[0], grid.shape[1], -1, 2)
+    else:
+        batch_grid = grid
+
+    semantic_features = (
+        F.grid_sample(
+            semantic_feats, batch_grid, align_corners=True, mode="bilinear", padding_mode=padding_mode
+        )
+        .permute(2, 3, 1, 0)
+        .squeeze()
+    )
+    if use_batch_semantic_features:
+        # semantic_features: (4096, 128, 9*21)
+        semantic_features = semantic_features.reshape(pts_ndc.shape[0], pts_ndc.shape[1], -1)
+        # semantic_features = semantic_features.mean(dim=2)
+
     with torch.no_grad():
         in_mask = (grid > -1.0) * (grid < 1.0) # (1,4096,128,2)
         in_mask = (in_mask[..., 0] * in_mask[..., 1]).float().permute(1, 2, 0) # (4096,128,1)

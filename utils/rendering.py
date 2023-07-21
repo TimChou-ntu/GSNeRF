@@ -143,7 +143,7 @@ def get_angle_wrt_src_cams(c2ws, rays_pts, rays_dir_unit):
     return angle
 
 
-def interpolate_pts_feats(imgs, feats_fpn, semantic_feat, feats_vol, rays_pts_ndc, padding_mode='border'):
+def interpolate_pts_feats(imgs, feats_fpn, semantic_feat, feats_vol, rays_pts_ndc, padding_mode='border', use_batch_semantic_features=False):
     nb_views = feats_fpn.shape[1]
     interpolated_feats = []
 
@@ -155,9 +155,8 @@ def interpolate_pts_feats(imgs, feats_fpn, semantic_feat, feats_vol, rays_pts_nd
         ray_feats_2 = interpolate_3D(
             feats_vol[f"level_2"][:, i], rays_pts_ndc[f"level_2"][:, :, i], padding_mode=padding_mode
         )
-
         ray_feats_fpn, ray_colors, ray_semantic_feats_fpn, ray_masks = interpolate_2D(
-            feats_fpn[:, i], imgs[:, i], semantic_feat[:, i], rays_pts_ndc[f"level_0"][:, :, i], padding_mode=padding_mode
+            feats_fpn[:, i], imgs[:, i], semantic_feat[:, i], rays_pts_ndc[f"level_0"][:, :, i], padding_mode=padding_mode, use_batch_semantic_features=use_batch_semantic_features
         )
         # When using only one point per ray, all features except ray masks are 2D (N_rays, C), while ray masks are 3D (N_rays, C, 1), so we need to squeeze it
         if ray_colors.dim() == 2 and ray_masks.dim() == 3:
@@ -171,7 +170,7 @@ def interpolate_pts_feats(imgs, feats_fpn, semantic_feat, feats_vol, rays_pts_nd
                     ray_feats_2,                # (N_rays, N_samples, 8)
                     ray_feats_fpn,              # (N_rays, N_samples, 8)
                     ray_colors,                 # (N_rays, N_samples, 3)
-                    ray_semantic_feats_fpn,     # (N_rays, N_samples, nb_classes(21))
+                    ray_semantic_feats_fpn,     # (N_rays, N_samples, nb_classes(21)) / if use_batch_semantic_features, (N_rays, N_samples, 9*nb_classes(21))
                     ray_masks,                  # (N_rays, N_samples, 1)
                 ],
                 dim=-1,
@@ -221,6 +220,7 @@ def render_rays(
     # middle_pts_depth, 
     # middle_ray_pts_ndc,
     semantic_feat=None,
+    use_batch_semantic_features=False,
 ):
     ## The angles between the ray and source camera vectors
     rays_dir_unit = rays_dir / torch.norm(rays_dir, dim=-1, keepdim=True)
@@ -230,7 +230,7 @@ def render_rays(
     embedded_angles = get_embedder()(angles)
 
     ## Interpolate all features for sample points (N_rays, N_samples, source_view_num, 8+8+8+8+3+21+1)
-    pts_feat = interpolate_pts_feats(imgs, feats_fpn, semantic_feat, feats_vol, rays_pts_ndc)
+    pts_feat = interpolate_pts_feats(imgs, feats_fpn, semantic_feat, feats_vol, rays_pts_ndc, use_batch_semantic_features=use_batch_semantic_features)
 
     ## Getting Occlusion Masks based on predicted depths (N_rays, N_samples, source_view_num, 1)
     occ_masks = get_occ_masks(depth_map_norm, rays_pts_ndc)

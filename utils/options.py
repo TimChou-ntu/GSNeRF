@@ -55,7 +55,7 @@ def config_parser():
     parser.add_argument("--scene", type=str, default="None", help="Scene for fine-tuning")
     parser.add_argument("--cross_entropy_weight", type=float, default=0.1, help="Weight for cross entropy loss")
     parser.add_argument("--optimizer", type=str, default="adam", help="select optimizer: adam / sgd")
-    parser.add_argument("--background_weight", type=float, default=0.3, help="Weight for background class in cross entropy loss")
+    parser.add_argument("--background_weight", type=float, default=1, help="Weight for background class in cross entropy loss")
     parser.add_argument("--two_stage_training_steps", type=int, default=60000, help="Use two stage training, indicating how many steps for first stage")
 
     # Rendering options
@@ -77,6 +77,8 @@ def config_parser():
     parser.add_argument("--use_depth_refine_net", action="store_true", help="Use depth refine net before rendering process")
     parser.add_argument("--using_semantic_global_tokens", type=int, default=0, help="Use only semantic global tokens in rendering process. 0: not use, 1: use")
     parser.add_argument("--only_using_semantic_global_tokens", type=int, default=0, help="Use only semantic global tokens in rendering process. 0: not use, 1: use")
+    parser.add_argument("--use_batch_semantic_feature", action="store_true", help="Use batch semantic feature in rendering process")
+    parser.add_argument("--ddp", action="store_true", help="Use distributed data parallel")
 
     # resume options
     parser.add_argument("--ckpt_path", type=str, default=None, help="Path to a checkpoint to resume training")

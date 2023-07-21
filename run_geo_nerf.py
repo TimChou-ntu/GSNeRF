@@ -60,21 +60,23 @@ class GeoNeRF(LightningModule):
         # (0: wall, 1: floor, 20: invalid)
         # 20 + 1 classes cause unbalanced data
         weights = [hparams.background_weight, hparams.background_weight] + [1.0] * (hparams.nb_class - 3) + [hparams.background_weight]
-        class_weights = torch.FloatTensor(weights).cuda()
+        class_weights = torch.FloatTensor(weights)
         self.semantic_loss = SemanticLoss(nb_class=hparams.nb_class, ignore_label=hparams.ignore_label, weight=class_weights)
         self.semantic_feat_loss = nn.CrossEntropyLoss(ignore_index=hparams.ignore_label, weight=class_weights)
         self.target_depth_loss = nn.SmoothL1Loss(reduction="mean")
         self.learning_rate = hparams.lrate
 
         # Create geometry_reasoner and renderer models
-        self.geo_reasoner = CasMVSNet(use_depth=hparams.use_depth, nb_class=hparams.nb_class).cuda()
+        self.geo_reasoner = CasMVSNet(use_depth=hparams.use_depth, nb_class=hparams.nb_class)
         self.renderer = Renderer(nb_samples_per_ray=hparams.nb_coarse + hparams.nb_fine, 
                                  nb_view=hparams.nb_views, nb_class=hparams.nb_class,
                                  using_semantic_global_tokens=hparams.using_semantic_global_tokens,
-                                 only_using_semantic_global_tokens=hparams.only_using_semantic_global_tokens).cuda()
-        # self.semantic_net = Semantic_predictor(nb_view=hparams.nb_views, nb_class=hparams.nb_class).cuda()
+                                 only_using_semantic_global_tokens=hparams.only_using_semantic_global_tokens,
+                                 use_batch_semantic_feature=hparams.use_batch_semantic_feature,
+                                )
+        # self.semantic_net = Semantic_predictor(nb_view=hparams.nb_views, nb_class=hparams.nb_class)
         if hparams.target_depth_estimation & hparams.use_depth_refine_net:
-            self.depth_refine_net = UNet(n_channels=1, n_classes=1).cuda()
+            self.depth_refine_net = UNet(n_channels=1, n_classes=1)
 
         self.eval_metric = [0.01, 0.05, 0.1]
         # self.miou = JaccardIndex(task="multiclass",num_classes=hparams.nb_class, ignore_index=0)
@@ -96,7 +98,7 @@ class GeoNeRF(LightningModule):
 
         return (data - mean) / std
 
-    def prepare_data(self):
+    def setup(self, stage=None):
         if self.hparams.scene == "None":  ## Generalizable
             self.train_dataset, self.train_sampler = get_training_dataset(self.hparams)
             self.val_dataset = get_validation_dataset(self.hparams)
@@ -243,6 +245,7 @@ class GeoNeRF(LightningModule):
             # middle_pts_depth=middle_pts_depth,
             # semantic_net=self.semantic_net,
             semantic_feat=semantic_feats,
+            use_batch_semantic_features=self.hparams.use_batch_semantic_feature,
         )
 
         # semantic_logits might be supervised by ground truth segmentation, batch size=1
@@ -497,6 +500,7 @@ class GeoNeRF(LightningModule):
                     # middle_pts_depth=middle_pts_depth,
                     # semantic_net=self.semantic_net,
                     semantic_feat=semantic_feats,
+                    use_batch_semantic_features=self.hparams.use_batch_semantic_feature,
                 )
                 rendered_rgb.append(rend_rgb)
                 rendered_semantic.append(ren_semantic)
@@ -851,7 +855,7 @@ if __name__ == "__main__":
     # args.use_amp = False if args.eval else True
     args.use_amp = False 
     trainer = Trainer(
-        accelerator="gpu",
+        accelerator="auto",
         max_steps=args.num_steps,
         callbacks=[checkpoint_callback],
         logger=logger,
@@ -861,6 +865,7 @@ if __name__ == "__main__":
         check_val_every_n_epoch=1000 if args.scene != 'None' else 1,
         benchmark=True,
         precision='16-mixed' if args.use_amp else 32,
+        strategy= 'ddp' if args.ddp else 'auto',
     )
 
     if not args.eval:  ## Train

@@ -224,7 +224,7 @@ class EncoderLayer(nn.Module):
 
 class Renderer(nn.Module):
     def __init__(self, nb_samples_per_ray, nb_view=8, nb_class=21, 
-                 using_semantic_global_tokens=True, only_using_semantic_global_tokens=True):
+                 using_semantic_global_tokens=True, only_using_semantic_global_tokens=True, use_batch_semantic_feature=False):
         super(Renderer, self).__init__()
 
         self.nb_view = nb_view
@@ -233,6 +233,11 @@ class Renderer(nn.Module):
         self.only_using_semantic_global_tokens = only_using_semantic_global_tokens
         self.dim = 32
 
+        if use_batch_semantic_feature:
+            self.nb_class = self.nb_class * 9
+        else:
+            self.nb_class = self.nb_class
+            
         self.semantic_token_gen = nn.Linear(1 + self.nb_class, self.dim)
 
         self.attn_token_gen = nn.Linear(24 + 1 + 8, self.dim)
@@ -281,7 +286,7 @@ class Renderer(nn.Module):
 
 
         ## Setting mask of var_mean always enabled
-        self.var_mean_mask = torch.tensor([1]).cuda()
+        self.var_mean_mask = torch.tensor([1])
         self.var_mean_mask.requires_grad = False
 
         ## For aggregating data along ray samples
@@ -340,7 +345,7 @@ class Renderer(nn.Module):
 
         ## Adding a new channel to mask for var_mean
         vis_mask = torch.cat(
-            [vis_mask, self.var_mean_mask.view(1, 1, 1).expand(N * S, -1, -1)], dim=1
+            [vis_mask, self.var_mean_mask.view(1, 1, 1).expand(N * S, -1, -1).to(vis_mask.device)], dim=1
         )
         ## If a point is not visible by any source view, force its masks to enabled
         vis_mask = vis_mask.masked_fill(vis_mask.sum(dim=1, keepdims=True) == 1, 1)
