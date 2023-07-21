@@ -30,6 +30,7 @@ class SemanticLoss(Loss):
             label_pr = label_pr[valid_mask]
             label_gt = label_gt[valid_mask]
             if self.weight != None:
+                self.weight = self.weight.to(label_pr.device)
                 return nn.functional.cross_entropy(label_pr, label_gt, reduction='mean', weight=self.weight).unsqueeze(0)
             else:
                 return nn.functional.cross_entropy(label_pr, label_gt, reduction='mean').unsqueeze(0)

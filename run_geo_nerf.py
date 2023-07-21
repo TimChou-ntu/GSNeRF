@@ -67,7 +67,7 @@ class GeoNeRF(LightningModule):
         self.learning_rate = hparams.lrate
 
         # Create geometry_reasoner and renderer models
-        self.geo_reasoner = CasMVSNet(use_depth=hparams.use_depth, nb_class=hparams.nb_class)
+        self.geo_reasoner = CasMVSNet(use_depth=hparams.use_depth, nb_class=hparams.nb_class, feat_net=hparams.feat_net)
         self.renderer = Renderer(nb_samples_per_ray=hparams.nb_coarse + hparams.nb_fine, 
                                  nb_view=hparams.nb_views, nb_class=hparams.nb_class,
                                  using_semantic_global_tokens=hparams.using_semantic_global_tokens,

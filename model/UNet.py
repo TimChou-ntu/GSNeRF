@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from inplace_abn import InPlaceABN
-
+import segmentation_models_pytorch as smp
 
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
@@ -130,9 +130,52 @@ class UNet(nn.Module):
                   
         return output
 
+class smp_UNet(nn.Module):
+    def __init__(self, n_channels, n_classes, bilinear=False):
+        super(smp_UNet, self).__init__()
+        self.n_channels = n_channels
+        self.n_classes = n_classes
 
-# if __name__ == '__main__':
-#     x = torch.randn(6, 3, 256, 256)
-#     model = UNet(3, 1)
-#     y = model(x)
-#     print(y.shape)
+        self.model = smp.Unet(
+            encoder_name="timm-mobilenetv3_small_minimal_100",  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+            in_channels=n_channels,  # model input channels (1 for grayscale images, 3 for RGB, etc.)
+            classes=self.n_classes,  # model output channels (number of classes in your dataset)
+            encoder_depth=4,
+            decoder_channels=(128, 64, 64, 32),
+        )
+        self.toplayer = nn.Conv2d(16, 32, 1)
+        self.lat1 = nn.Conv2d(16, 32, 1)
+        self.lat0 = nn.Conv2d(3, 32, 1)
+
+        # to reduce channel size of the outputs from FPN
+        self.smooth1 = nn.Conv2d(32, 16, 3, padding=1)
+        self.smooth0 = nn.Conv2d(32, 8, 3, padding=1)
+
+        self.projection = nn.Sequential(
+            nn.Conv2d(self.n_classes, self.n_classes, 1),
+        )
+
+    def _upsample_add(self, x, y):
+        return F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=True) + y
+
+    def forward(self, x):
+        feature = self.model(x)
+        feat = self.model.encoder(x)
+
+        x3 = feat[2]
+        x2 = feat[1]
+        x1 = feat[0]
+        # original FeatureNet used in depth estimation
+        feat2 = self.toplayer(x3)  # (B, 32, H//4, W//4)
+        feat1 = self._upsample_add(feat2, self.lat1(x2))  # (B, 32, H//2, W//2)
+        feat0 = self._upsample_add(feat1, self.lat0(x1))  # (B, 32, H, W)
+
+        # reduce output channels
+        feat1 = self.smooth1(feat1)  # (B, 16, H//2, W//2)
+        feat0 = self.smooth0(feat0)  # (B, 8, H, W)
+
+        logits = self.projection(feature)
+
+        output = {"level_0": feat0, "level_1": feat1, "level_2": feat2, 'logits': logits, 'feature': feature}
+                  
+        return output

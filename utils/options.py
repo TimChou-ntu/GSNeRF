@@ -79,7 +79,7 @@ def config_parser():
     parser.add_argument("--only_using_semantic_global_tokens", type=int, default=0, help="Use only semantic global tokens in rendering process. 0: not use, 1: use")
     parser.add_argument("--use_batch_semantic_feature", action="store_true", help="Use batch semantic feature in rendering process")
     parser.add_argument("--ddp", action="store_true", help="Use distributed data parallel")
-
+    parser.add_argument("--feat_net", type=str, default="UNet", choices=["UNet", "smp_UNet"], help="FeatureNet used in depth estimation")
     # resume options
     parser.add_argument("--ckpt_path", type=str, default=None, help="Path to a checkpoint to resume training")
     return parser.parse_args()

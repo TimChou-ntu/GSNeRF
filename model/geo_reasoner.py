@@ -42,7 +42,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
-from model.UNet import UNet
+from model.UNet import UNet, smp_UNet
 from utils.utils import homo_warp
 from inplace_abn import InPlaceABN
 
@@ -236,7 +236,7 @@ class CostRegNet(nn.Module):
 
 
 class CasMVSNet(nn.Module):
-    def __init__(self, num_groups=8, norm_act=InPlaceABN, levels=3, use_depth=False, nb_class=1):
+    def __init__(self, num_groups=8, norm_act=InPlaceABN, levels=3, use_depth=False, nb_class=1, feat_net=None):
         super(CasMVSNet, self).__init__()
         self.levels = levels  # 3 depth levels
         self.n_depths = [8, 32, 48]
@@ -246,7 +246,12 @@ class CasMVSNet(nn.Module):
         self.G = num_groups  # number of groups in groupwise correlation
         # self.feature = FeatureNet()
         # change to UNet
-        self.feature = UNet(3,nb_class)
+        if feat_net is None:
+            raise ValueError("feat_net must be specified")
+        elif feat_net == 'UNet':
+            self.feature = UNet(3,nb_class)
+        elif feat_net == 'smp_UNet':
+            self.feature = smp_UNet(3,nb_class)
 
         for l in range(self.levels):
             if l == self.levels - 1 and self.use_depth:
