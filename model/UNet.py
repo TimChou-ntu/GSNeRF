@@ -159,7 +159,7 @@ class smp_UNet(nn.Module):
         return F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=True) + y
 
     def forward(self, x):
-         feat = self.model.encoder(x)
+        feat = self.model.encoder(x)
 
         feature = self.model.decoder(*feat)
         feature = self.model.segmentation_head(feature)
