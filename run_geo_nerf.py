@@ -335,6 +335,11 @@ class GeoNeRF(LightningModule):
             loss = loss + mse_loss + croos_entropy_loss*self.hparams["cross_entropy_weight"] + semantic_logits_loss*self.hparams["cross_entropy_weight"]
         # loss = loss + mse_loss + croos_entropy_loss*0.1 + semantic_logits_loss*0.1 + target_depth_loss
         # loss = mse_loss + croos_entropy_loss*0.01
+        if self.hparams.ddp:
+            losses = self.all_gather(loss)
+            if any(torch.isnan(loss) for loss in losses):
+                print("skip nan loss")
+                return None  # skip training step
         if torch.isnan(loss):
             print("Nan loss encountered, skipping batch...")
             img_vis = (
