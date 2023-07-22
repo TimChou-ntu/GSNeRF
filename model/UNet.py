@@ -143,6 +143,7 @@ class smp_UNet(nn.Module):
             encoder_depth=4,
             decoder_channels=(128, 64, 64, 32),
         )
+        del self.model.encoder.model.blocks[4:]
         self.toplayer = nn.Conv2d(16, 32, 1)
         self.lat1 = nn.Conv2d(16, 32, 1)
         self.lat0 = nn.Conv2d(3, 32, 1)

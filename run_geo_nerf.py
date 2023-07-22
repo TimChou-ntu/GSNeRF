@@ -356,6 +356,7 @@ class GeoNeRF(LightningModule):
                 f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/nan_batch/{self.global_step:08d}_{batch_nb:04d}.png",
                 (img_vis * 255).astype("uint8"),
             )
+            return {"loss": torch.nan_to_num(loss, nan=0.0)}
             return None
         else:
             with torch.no_grad():
@@ -865,7 +866,7 @@ if __name__ == "__main__":
         check_val_every_n_epoch=1000 if args.scene != 'None' else 1,
         benchmark=True,
         precision='16-mixed' if args.use_amp else 32,
-        strategy= 'ddp_find_unused_parameters_true' if args.ddp else 'auto',
+        strategy= 'ddp' if args.ddp else 'auto',
     )
 
     if not args.eval:  ## Train
