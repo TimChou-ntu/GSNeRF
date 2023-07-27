@@ -50,6 +50,15 @@ def get_training_dataset(args, downsample=1.0):
         )
         train_sampler = None
         return train_dataset, train_sampler
+    elif args.dataset_name == "replica":
+        cfg = {"resolution_type": "hr",   "type2sample_weights": {"replica": 1}, "train_database_types": ['replica']}
+        train_dataset = RendererDataset(
+            cfg=cfg,
+            root_dir=args.replica_path,
+            is_train=True
+        )
+        train_sampler = None
+        return train_dataset, train_sampler
     
     train_datasets = [
         DTU_Dataset(
@@ -187,6 +196,17 @@ def get_validation_dataset(args, downsample=1.0):
             for name in val_scenes:
                 val_cfg = {'val_database_name': name}
                 val_set = RendererDataset(cfg=val_cfg, is_train=False, root_dir=args.scannet_path)
+                val_set_list.append(val_set)
+                val_set_names.append(name)
+                print(f'{name} val set len {len(val_set)}')
+        val_dataset = ConcatDataset(val_set_list)
+    elif args.dataset_name == "replica":
+        val_set_list, val_set_names = [], []
+        if isinstance(args.val_set_list, str):
+            val_scenes = np.loadtxt(args.val_set_list, dtype=str).tolist()
+            for name in val_scenes:
+                val_cfg = {'val_database_name': name}
+                val_set = RendererDataset(cfg=val_cfg, is_train=False, root_dir=args.replica_path)
                 val_set_list.append(val_set)
                 val_set_names.append(name)
                 print(f'{name} val set len {len(val_set)}')

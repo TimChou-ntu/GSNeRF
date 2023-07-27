@@ -298,7 +298,7 @@ class UnSupLoss(nn.Module):
 
         ref_img = imgs[0]
 
-        if stage_idx == 0:
+        if stage_idx == 2:
             ref_img = F.interpolate(ref_img, scale_factor=0.25,recompute_scale_factor=True)
         elif stage_idx == 1:
             ref_img = F.interpolate(ref_img, scale_factor=0.5,recompute_scale_factor=True)
@@ -325,7 +325,7 @@ class UnSupLoss(nn.Module):
             view_cam = cams[view]
             # print('view_cam: {}'.format(view_cam.shape))
             # view_img = F.interpolate(view_img, scale_factor=0.25, mode='bilinear')
-            if stage_idx == 0:
+            if stage_idx == 2:
                 view_img = F.interpolate(view_img, scale_factor=0.25,recompute_scale_factor=True)
             elif stage_idx == 1:
                 view_img = F.interpolate(view_img, scale_factor=0.5,recompute_scale_factor=True)
@@ -372,17 +372,24 @@ class UnsupLossMultiStage(nn.Module):
         super(UnsupLossMultiStage, self).__init__()
         self.unsup_loss = UnSupLoss()
 
-    def forward(self, inputs, imgs, cams, **kwargs):
-        depth_loss_weights = kwargs.get("dlossw", None)
+    def forward(self, inputs, imgs, cams, depth_loss_weights=[2.0,1.0,0.5]):
+        '''
+        inputs: dict {"level_0": (1, 8, 240, 320), "level_1": (1,, 8, 120, 160), "level_2": (1, 8, 60, 80))}
+        imgs: (1, 8, 3, 480, 640)
+        cams: (1, 8, 3, 2, 4, 4)
+        '''
+        # depth_loss_weights = kwargs.get("dlossw", None)
 
         total_loss = torch.tensor(0.0, dtype=torch.float32, device=imgs.device, requires_grad=False)
 
         scalar_outputs = {}
-        for (stage_inputs, stage_key) in [(inputs[k], k) for k in inputs.keys() if "stage" in k]:
-            stage_idx = int(stage_key.replace("stage", "")) - 1
+        for (stage_inputs, stage_key) in [(inputs[k], k) for k in inputs.keys() if "level_" in k]:
+            stage_idx = int(stage_key.replace("level_", "")) # (0,1,2; 0 is biggest; 2 is smallest)
 
-            depth_est = stage_inputs["depth"]
-            depth_loss = self.unsup_loss(imgs, cams[stage_key], depth_est, stage_idx)
+            depth_est = stage_inputs
+            depth_loss = 0
+            for i in range(depth_est.shape[1]):
+                depth_loss += self.unsup_loss(imgs.roll(-i,1), cams.roll(-i,1)[:,:,stage_idx], depth_est[:, i], stage_idx)
 
 
             if depth_loss_weights is not None:

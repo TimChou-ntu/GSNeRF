@@ -31,7 +31,7 @@ def config_parser():
     parser.add_argument("--ignore_label", type=int, default=20, help="Ignore label for segmentation")
 
     # Datasets options
-    parser.add_argument("--dataset_name", type=str, default="llff", choices=["llff", "nerf", "dtu", "klevr", "scannet"],)
+    parser.add_argument("--dataset_name", type=str, default="llff", choices=["llff", "nerf", "dtu", "klevr", "scannet", "replica"],)
     parser.add_argument("--llff_path", type=str, help="Path to llff dataset")
     parser.add_argument("--llff_test_path", type=str, help="Path to llff dataset")
     parser.add_argument("--dtu_path", type=str, help="Path to dtu dataset")
@@ -42,6 +42,7 @@ def config_parser():
     parser.add_argument("--ibrnet2_path", type=str, help="Path to ibrnet2 dataset")
     parser.add_argument("--klevr_path", type=str, help="Path to klevr dataset")
     parser.add_argument("--scannet_path", type=str, help="Path to scannet dataset")
+    parser.add_argument("--replica_path", type=str, help="Path to replica dataset")
 
     # for scannet dataset
     parser.add_argument("--val_set_list", type=str, help="Path to scannet val dataset list")
@@ -57,6 +58,7 @@ def config_parser():
     parser.add_argument("--optimizer", type=str, default="adam", help="select optimizer: adam / sgd")
     parser.add_argument("--background_weight", type=float, default=1, help="Weight for background class in cross entropy loss")
     parser.add_argument("--two_stage_training_steps", type=int, default=60000, help="Use two stage training, indicating how many steps for first stage")
+    parser.add_argument("--self_supervised_depth_loss", action="store_true", help="Use self supervised depth loss")
 
     # Rendering options
     parser.add_argument("--chunk", type=int, default=4096, help="Number of rays rendered in parallel")

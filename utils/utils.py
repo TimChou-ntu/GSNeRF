@@ -568,6 +568,7 @@ def get_rays_pts(
         rays_gt_semantic,
         rays_gt_depth,
         rays_pixs,
+        rays_depth,
     )
 
 

@@ -29,5 +29,7 @@ def get_scheduler(hparams, optimizer):
 
     # else:
     #     raise ValueError('scheduler not recognized!')
-
-    return CosineAnnealingLR(optimizer, T_max=hparams.num_steps, eta_min=eps)
+    num_steps = hparams.num_steps
+    if hparams.ddp:
+        num_steps /= 8
+    return CosineAnnealingLR(optimizer, T_max=num_steps, eta_min=eps)

@@ -152,7 +152,7 @@ class ScannetDatabase(BaseDatabase):
         transf = np.diag(np.asarray([1, -1, -1, 1]))
         pose = np.loadtxt(
             f'{self.root_dir}/pose/{int(img_id)}.txt').reshape([4, 4])
-        pose = transf @ pose
+        # pose = transf @ pose
         # c2w in files, change to w2c
         # pose = pose_inverse(pose)
         return pose.copy()
@@ -211,12 +211,24 @@ def get_database_split(database: BaseDatabase, split_type='val'):
             val_ids = img_ids[2:700:20]
             if len(val_ids) > 10:
                 val_ids = val_ids[:10]
+        elif database_name.startswith('replica'):
+            img_ids = database.get_img_ids()
+            train_ids = img_ids[:700:5]
+            val_ids = img_ids[2:700:20]
+            if len(val_ids) > 10:
+                val_ids = val_ids[:10]
         else:
             raise NotImplementedError
     elif split_type.startswith('test'):
         splits = split_type.split('_')
         depth_valid = not(len(splits) > 1 and splits[1] == 'all')
         if database_name.startswith('scannet'):
+            img_ids = database.get_img_ids()
+            train_ids = img_ids[:700:5]
+            val_ids = img_ids[2:700:20]
+            if len(val_ids) > 10:
+                val_ids = val_ids[:10]
+        elif database_name.startswith('replica'):
             img_ids = database.get_img_ids()
             train_ids = img_ids[:700:5]
             val_ids = img_ids[2:700:20]
@@ -419,13 +431,14 @@ def imgs_info_slice(imgs_info, indices):
 
 
 class ReplicaDatabase(BaseDatabase):
-    def __init__(self, database_name):
+    def __init__(self, database_name, root_dir='data/scannet'):
         super().__init__(database_name)
         _, self.scene_name, self.seq_id, background_size = database_name.split('/')
         background, image_size = background_size.split('_')
         self.image_size = int(image_size)
         self.background = background
-        self.root_dir = f'data/replica/{self.scene_name}/{self.seq_id}'
+        self.root_dir = f'{root_dir}/{self.scene_name}/{self.seq_id}'
+        # self.root_dir = f'data/replica/{self.scene_name}/{self.seq_id}'
         self.ratio = self.image_size / 640
         self.h, self.w = int(self.ratio*480), int(self.image_size)
 
@@ -454,11 +467,11 @@ class ReplicaDatabase(BaseDatabase):
         transf = np.diag(np.asarray([1, -1, -1]))
         num_poses = c2ws.shape[0]
         for i in range(num_poses):
-            pose = c2ws[i][:3]
+            pose = c2ws[i]
             # Change the pose to OpenGL coordinate system
             # TODO: check if this is correct, our code is using OpenCV coordinate system
             # pose = transf @ pose
-            pose = pose_inverse(pose)
+            # pose = pose_inverse(pose)
             self.poses.append(pose)
 
         self.img_ids = []
@@ -466,14 +479,8 @@ class ReplicaDatabase(BaseDatabase):
             self.img_ids.append(i)
 
         self.label_mapping = PointSegClassMapping(
-            valid_cat_ids=[
-                3, 7, 8, 10, 11, 12, 13, 14, 15, 16,
-                17, 18, 19, 20, 22, 23, 26, 29, 31,
-                34, 35, 37, 40, 44, 47, 52, 54, 56,
-                59, 60, 61, 62, 63, 64, 65, 70, 71,
-                76, 78, 79, 80, 82, 83, 87, 88, 91,
-                92, 93, 95, 97, 98
-            ],
+            valid_cat_ids=[12, 17, 20, 22, 31, 37, 40, 44, 47, 56, 
+                           64, 79, 80, 87, 91, 92, 93, 95, 97],
             max_cat_id=101
         )
 

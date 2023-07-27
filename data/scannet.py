@@ -112,7 +112,9 @@ class RendererDataset(Dataset):
             self.num=999999
             self.type2scene_names,self.database_types,self.database_weights = {}, [], []
             if self.cfg['resolution_type']=='hr':
-                type2scene_names={}
+                type2scene_names={
+                    'replica': np.loadtxt('configs/lists/replica_train_split.txt',dtype=str).tolist(),
+                }
             elif self.cfg['resolution_type']=='lr':
                 type2scene_names={
                     'scannet': np.loadtxt('configs/lists/scannetv2_train_split.txt',dtype=str).tolist(),
@@ -175,6 +177,9 @@ class RendererDataset(Dataset):
             elif database_name.startswith('scannet'):
                 pool_ratio = np.random.randint(1, 3)
                 dist_idx = dist_idx[:min(ref_num * pool_ratio, 12)]
+            elif database_name.startswith('replica'):
+                pool_ratio = np.random.randint(1, 3)
+                dist_idx = dist_idx[:min(ref_num * pool_ratio, 12)]
             else:
                 raise NotImplementedError
         elif self.cfg['aug_view_select_type']=='easy':
@@ -190,6 +195,9 @@ class RendererDataset(Dataset):
                 pool_ratio = np.random.randint(1, 3)
                 dist_idx = dist_idx[:min(ref_num * pool_ratio, 12)]
             elif database_name.startswith('scannet'):
+                pool_ratio = np.random.randint(1, 3)
+                dist_idx = dist_idx[:min(ref_num * pool_ratio, 12)]
+            elif database_name.startswith('replica'):
                 pool_ratio = np.random.randint(1, 3)
                 dist_idx = dist_idx[:min(ref_num * pool_ratio, 12)]
             else:
@@ -412,6 +420,7 @@ class RendererDataset(Dataset):
 
             sample['w2cs'] = []
             affine_mats, affine_mats_inv, depths_aug = [], [], []
+            project_mats = []
             depths = {"level_0": [], "level_1": [], "level_2": []}
 
             for i in range(sample['c2ws'].shape[0]):
@@ -420,6 +429,7 @@ class RendererDataset(Dataset):
 
                 aff = []
                 aff_inv = []
+                proj_matrices = []
 
                 for l in range(3):
                     proj_mat_l = np.eye(4)
@@ -428,12 +438,19 @@ class RendererDataset(Dataset):
                     proj_mat_l[:3,:4] = intrinsic_temp @ sample['w2cs'][i][:3,:4]
                     aff.append(proj_mat_l)
                     aff_inv.append(np.linalg.inv(proj_mat_l))
+                    # For unsupervised depth loss
+                    proj_mat = np.zeros(shape=(2, 4, 4), dtype=np.float32)
+                    proj_mat[0, :4, :4] = sample['w2cs'][i][:4,:4]
+                    proj_mat[1, :3, :3] = intrinsic_temp
+                    proj_matrices.append(proj_mat)
 
                 aff = np.stack(aff, axis=-1)
                 aff_inv = np.stack(aff_inv, axis=-1)
+                proj_matrices = np.stack(proj_matrices)
 
                 affine_mats.append(aff)
                 affine_mats_inv.append(aff_inv)
+                project_mats.append(proj_matrices)
 
                 depth, depth_aug = self.multi_scale_depth(np.asarray(sample['depths_h'][i]))
                 depths["level_0"].append(depth["level_0"])
@@ -443,6 +460,7 @@ class RendererDataset(Dataset):
 
             affine_mats = np.stack(affine_mats)
             affine_mats_inv = np.stack(affine_mats_inv)
+            project_mats = np.stack(project_mats)
             depths_aug = np.stack(depths_aug)
             depths["level_0"] = np.stack(depths["level_0"])
             depths["level_1"] = np.stack(depths["level_1"])
@@ -454,6 +472,7 @@ class RendererDataset(Dataset):
             sample['affine_mats_inv'] = affine_mats_inv
             sample['depths_aug'] = depths_aug
             sample['depths'] = depths
+            sample['project_mats'] = project_mats
 
             return sample
         

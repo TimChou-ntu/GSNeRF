@@ -46,6 +46,7 @@ from data.get_datasets import (
     get_validation_dataset,
 )
 from utils.loss import SemanticLoss
+from utils.depth_loss import UnsupLossMultiStage
 
 lpips_fn = lpips.LPIPS(net="vgg")
 
@@ -57,6 +58,7 @@ class GeoNeRF(LightningModule):
         self.wr_cntr = 0
 
         self.depth_loss = SL1Loss()
+        self.unsup_depth_loss = UnsupLossMultiStage()
         # (0: wall, 1: floor, 20: invalid)
         # 20 + 1 classes cause unbalanced data
         weights = [hparams.background_weight, hparams.background_weight] + [1.0] * (hparams.nb_class - 3) + [hparams.background_weight]
@@ -165,7 +167,7 @@ class GeoNeRF(LightningModule):
             )
 
         ## currently scannet dataset no normalizing
-        if self.hparams.dataset_name != 'scannet':
+        if self.hparams.dataset_name != 'scannet' and self.hparams.dataset_name != 'replica':
             unpre_imgs = self.unpreprocess(batch["images"])
         else:
             unpre_imgs = batch["images"]
@@ -204,6 +206,7 @@ class GeoNeRF(LightningModule):
             rays_gt_semantic,
             rays_gt_depth,
             rays_pixs,
+            rays_depth,
         ) = get_rays_pts(
             H,
             W,
@@ -260,7 +263,7 @@ class GeoNeRF(LightningModule):
         if self.hparams.scene == "None":
         # if False:
             ## if ground truth is available
-            if isinstance(batch["depths"], dict):
+            if isinstance(batch["depths"], dict) and (not self.hparams.self_supervised_depth_loss):
             # if False:
                 loss = loss + 1 * self.depth_loss(depth_map, batch["depths"])
                 if loss != 0:
@@ -281,6 +284,16 @@ class GeoNeRF(LightningModule):
                 if loss != 0:
                     self.log("train/dlosspgt", loss.item(), prog_bar=False,sync_dist =True)
 
+                ## Supervising each depth_map
+                RC_MVS_loss = 0.1 * self.unsup_depth_loss(
+                    inputs=depth_map, 
+                    imgs=unpre_imgs[:, :nb_views], 
+                    cams=batch["project_mats"][:, :nb_views],
+                )[0]
+                loss = loss + RC_MVS_loss
+                if RC_MVS_loss != 0:
+                    self.log("train/RC_MVS_loss", RC_MVS_loss.item(), prog_bar=False,sync_dist =True)
+
         mask = rays_gt_depth > 0
         depth_available = mask.sum() > 0
 
@@ -288,7 +301,10 @@ class GeoNeRF(LightningModule):
         # if False:
         ## This loss is only used in the generalizable model
         if self.hparams.scene == "None":
-            loss = loss + 0.1 * self.depth_loss(rendered_depth, rays_gt_depth)
+            if self.hparams.self_supervised_depth_loss:
+                loss = loss + 0.05 * self.depth_loss(rendered_depth, rays_depth.detach())
+            else:
+                loss = loss + 0.1 * self.depth_loss(rendered_depth, rays_gt_depth)
 
         self.log(
             f"train/acc_l_{self.eval_metric[0]}mm",
@@ -440,7 +456,7 @@ class GeoNeRF(LightningModule):
                 )
 
             ## currently scannet dataset no normalizing
-            if self.hparams.dataset_name != 'scannet':
+            if self.hparams.dataset_name != 'scannet' and self.hparams.dataset_name != 'replica':
                 unpre_imgs = self.unpreprocess(batch["images"])
             else:
                 unpre_imgs = batch["images"]
@@ -470,7 +486,7 @@ class GeoNeRF(LightningModule):
             for chunk_idx in range(
                 H * W // self.hparams.chunk + int(H * W % self.hparams.chunk > 0)
             ):
-                middle_pts_mask, pts_depth, rays_pts, rays_pts_ndc, rays_dir, _, _, _, _ = get_rays_pts(
+                middle_pts_mask, pts_depth, rays_pts, rays_pts_ndc, rays_dir, _, _, _, _, _ = get_rays_pts(
                     H,
                     W,
                     batch["c2ws"],
@@ -759,9 +775,9 @@ class GeoNeRF(LightningModule):
             mean_acc = torch.stack([x["val_acc"] for x in outputs]).mean()
             mean_class_acc = torch.stack([x["val_class_acc"] for x in outputs]).mean()
             try:
-                val_results["val_miou"] = torch.stack([x["val_miou"] for x in outputs]).reshape(-1, 10).mean(0).tolist()
-                val_results["val_acc"] = torch.stack([x["val_acc"] for x in outputs]).reshape(-1, 10).mean(0).tolist()
-                val_results["val_class_acc"] = torch.stack([x["val_class_acc"] for x in outputs]).reshape(-1, 10).mean(0).tolist()
+                val_results["val_miou"] = torch.stack([x["val_miou"] for x in outputs]).reshape(-1, 10).mean(1).tolist()
+                val_results["val_acc"] = torch.stack([x["val_acc"] for x in outputs]).reshape(-1, 10).mean(1).tolist()
+                val_results["val_class_acc"] = torch.stack([x["val_class_acc"] for x in outputs]).reshape(-1, 10).mean(1).tolist()
                 with open(os.path.join(self.hparams.logdir,self.hparams.dataset_name,self.hparams.expname,'val_results.json'), 'w') as f:
                     f.write(str(val_results).replace('\'', '\"'))
             except:
@@ -807,6 +823,7 @@ class GeoNeRF(LightningModule):
             metric_file.write(f"LPIPS: {mean_lpips}")
 
         self.validation_step_outputs.clear()  # free memory
+        del outputs
         return
 
 
