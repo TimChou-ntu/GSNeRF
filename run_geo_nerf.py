@@ -345,10 +345,13 @@ class GeoNeRF(LightningModule):
         if torch.isnan(mse_loss):
             print("Nan mse loss encountered, skipping batch...")
         # loss = loss + mse_loss + croos_entropy_loss*0.1
-        if self.global_step < self.hparams.two_stage_training_steps:
-            loss = loss + mse_loss + semantic_logits_loss*self.hparams["cross_entropy_weight"]
+        if self.hparams.segmentation:
+            if self.global_step < self.hparams.two_stage_training_steps:
+                loss = loss + mse_loss + semantic_logits_loss*self.hparams["cross_entropy_weight"]
+            else:
+                loss = loss + mse_loss + croos_entropy_loss*self.hparams["cross_entropy_weight"] + semantic_logits_loss*self.hparams["cross_entropy_weight"]
         else:
-            loss = loss + mse_loss + croos_entropy_loss*self.hparams["cross_entropy_weight"] + semantic_logits_loss*self.hparams["cross_entropy_weight"]
+            loss = loss + mse_loss
         # loss = loss + mse_loss + croos_entropy_loss*0.1 + semantic_logits_loss*0.1 + target_depth_loss
         # loss = mse_loss + croos_entropy_loss*0.01
         if self.hparams.ddp:

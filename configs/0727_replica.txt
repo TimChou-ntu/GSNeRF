@@ -1,11 +1,11 @@
 ### INPUT
-expname = 0720_batch_semanticfeature
-logdir = ./logs_scannet/
+expname = 0727_replica
+logdir = ./logs_replica/
 nb_views = 8
 
 ### number of class + 1
-nb_class = 21
-ignore_label = 20
+nb_class = 20
+ignore_label = 19
 
 ## model
 using_semantic_global_tokens = 1
@@ -13,10 +13,10 @@ only_using_semantic_global_tokens = 0
 use_depth_refine_net = False
 
 ## dataset
-dataset_name = scannet
-scannet_path = "/mnt/sdb/timothy/Desktop/2023Spring/Semantic-Ray/data/scannet"
+dataset_name = replica
+replica_path = "/mnt/sdb/timothy/Desktop/2023Spring/Semantic-Ray/data/replica"
 scene = None
-val_set_list = "configs/lists/scannetv2_test_split_pick.txt"
+val_set_list = "configs/lists/replica_val_split.txt"
 
 ### TESTING
 chunk = 4096  ### Reduce it to save memory
@@ -27,7 +27,8 @@ num_steps = 300000
 lrate = 0.0005
 logger = wandb
 batch_size = 1024
-two_stage_training_steps = 600000
+two_stage_training_steps = 0
 cross_entropy_weight = 0.5
 background_weight = 0.8
 use_batch_semantic_feature = True
+feat_net = smp_UNet

@@ -1,5 +1,5 @@
 ### INPUT
-expname = 0720_batch_semanticfeature
+expname = 0725_selfdepth_smp
 logdir = ./logs_scannet/
 nb_views = 8
 
@@ -27,7 +27,9 @@ num_steps = 300000
 lrate = 0.0005
 logger = wandb
 batch_size = 1024
-two_stage_training_steps = 600000
+two_stage_training_steps = 0
 cross_entropy_weight = 0.5
 background_weight = 0.8
 use_batch_semantic_feature = True
+feat_net = smp_UNet
+self_supervised_depth_loss
