@@ -64,19 +64,19 @@ class ConvAutoEncoder(nn.Module):
         # Encoder
         self.conv1 = nn.Sequential(
             nn.Conv1d(num_ch, num_ch * 2, 3, stride=1, padding=1),
-            nn.LayerNorm(S, elementwise_affine=False),
+            # nn.LayerNorm(S, elementwise_affine=False),
             nn.ELU(alpha=1.0, inplace=True),
             nn.MaxPool1d(2),
         )
         self.conv2 = nn.Sequential(
             nn.Conv1d(num_ch * 2, num_ch * 4, 3, stride=1, padding=1),
-            nn.LayerNorm(S // 2, elementwise_affine=False),
+            # nn.LayerNorm(S // 2, elementwise_affine=False),
             nn.ELU(alpha=1.0, inplace=True),
             nn.MaxPool1d(2),
         )
         self.conv3 = nn.Sequential(
             nn.Conv1d(num_ch * 4, num_ch * 4, 3, stride=1, padding=1),
-            nn.LayerNorm(S // 4, elementwise_affine=False),
+            # nn.LayerNorm(S // 4, elementwise_affine=False),
             nn.ELU(alpha=1.0, inplace=True),
             nn.MaxPool1d(2),
         )
@@ -84,23 +84,23 @@ class ConvAutoEncoder(nn.Module):
         # Decoder
         self.t_conv1 = nn.Sequential(
             nn.ConvTranspose1d(num_ch * 4, num_ch * 4, 4, stride=2, padding=1),
-            nn.LayerNorm(S // 4, elementwise_affine=False),
+            # nn.LayerNorm(S // 4, elementwise_affine=False),
             nn.ELU(alpha=1.0, inplace=True),
         )
         self.t_conv2 = nn.Sequential(
             nn.ConvTranspose1d(num_ch * 8, num_ch * 2, 4, stride=2, padding=1),
-            nn.LayerNorm(S // 2, elementwise_affine=False),
+            # nn.LayerNorm(S // 2, elementwise_affine=False),
             nn.ELU(alpha=1.0, inplace=True),
         )
         self.t_conv3 = nn.Sequential(
             nn.ConvTranspose1d(num_ch * 4, num_ch, 4, stride=2, padding=1),
-            nn.LayerNorm(S, elementwise_affine=False),
+            # nn.LayerNorm(S, elementwise_affine=False),
             nn.ELU(alpha=1.0, inplace=True),
         )
         # Output
         self.conv_out = nn.Sequential(
             nn.Conv1d(num_ch * 2, num_ch, 3, stride=1, padding=1),
-            nn.LayerNorm(S, elementwise_affine=False),
+            # nn.LayerNorm(S, elementwise_affine=False),
             nn.ELU(alpha=1.0, inplace=True),
         )
 
@@ -302,7 +302,12 @@ class Renderer(nn.Module):
         self.rgb_fc3 = nn.Linear(self.dim // 2, 1)
 
         ## Initialization
+        self.sigma_fc1.apply(weights_init)
+        self.sigma_fc2.apply(weights_init)
         self.sigma_fc3.apply(weights_init)
+        self.rgb_fc1.apply(weights_init)
+        self.rgb_fc2.apply(weights_init)
+        self.rgb_fc3.apply(weights_init)
 
     def forward(self, viewdirs, feat, occ_masks, middle_pts_mask):
         ## Viewing samples regardless of batch or ray

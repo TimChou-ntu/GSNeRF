@@ -1,23 +1,22 @@
-To train:
+<!-- To train:
 python run_geo_nerf.py --config configs/config_general_scannet.txt --segmentation --logger wandb --val_save_img_type depth --target_depth_estimation
-python run_geo_nerf.py --config configs/config_general_scannet.txt --segmentation --logger wandb --val_save_img_type depth --target_depth_estimation --use_depth_refine_net
 
 To validation:
 python run_geo_nerf.py --config configs/config_general_scannet.txt --segmentation --logger none --val_save_img_type depth --target_depth_estimation --ckpt_path /mnt/sdb/timothy/Desktop/2023Spring/generalized_nerf/logs_scannet/scannet/0625_scannet_withdepthloss_withsemanticfeatloss_semanticnetwasntinoptimizer/ckpts/ckpt_step-324895.ckpt --eval
 
 
 
+ -->
 
+> # GSNeRF: Enhancing 3D Scene Understanding with Generalizable Semantic Neural Radiance Fields <br>
+> Zi-Ting Chou, Sheng-Yu Huang, I-Jieh Liu, Yu-Chiang Wang <br>
+> [Project Page (TBD)]() | [Paper (TBD)]()
 
-> # [CVPR 2022] GeoNeRF: Generalizing NeRF with Geometry Priors <br>
-> Mohammad Mahdi Johari, Yann Lepoittevin, François Fleuret <br>
-> [Project Page](https://www.idiap.ch/paper/geonerf/) | [Paper](https://arxiv.org/abs/2111.13539)
-
-This repository contains a PyTorch Lightning implementation of our paper, GeoNeRF: Generalizing NeRF with Geometry Priors.
+This repository contains a PyTorch Lightning implementation of our paper, GSNeRF.
 
 ## Installation
 
-#### Tested on NVIDIA Tesla V100 and GeForce RTX 3090 GPUs with PyTorch 1.9 and PyTorch Lightning 1.3.7
+#### Tested on NVIDIA GeForce RTX 3090 GPUs with PyTorch 2.0.1 and PyTorch Lightning 2.0.4
 
 To install the dependencies, in addition to PyTorch, run:
 
@@ -26,93 +25,47 @@ pip install -r requirements.txt
 ```
 
 ## Evaluation and Training
-To reproduce our results, download pretrained weights from [here](https://drive.google.com/drive/folders/1ZtAc7VYvltcdodT_BrUrQ_4IAhz_L-Rf?usp=sharing) and put them in [pretrained_weights](./pretrained_weights) folder. Then, follow the instructions for each of the [LLFF (Real Forward-Facing)](#llff-real-forward-facing-dataset), [NeRF (Realistic Synthetic)](#nerf-realistic-synthetic-dataset), and [DTU](#dtu-dataset) datasets.
+Following [Semantic Nerf](https://github.com/Harry-Zhi/semantic_nerf) and [Semantic-Ray](https://github.com/liuff19/Semantic-Ray), we conduct experiment on [ScanNet](#scannet-real-world-indoor-scene-dataset) and [Replica](#replica-synthetic-indoor-scene-dataset) respectively.
+<!-- To reproduce our results, download pretrained weights from [here](https://drive.google.com/drive/folders/1ZtAc7VYvltcdodT_BrUrQ_4IAhz_L-Rf?usp=sharing) and put them in [pretrained_weights](./pretrained_weights) folder. Then, follow the instructions for each of the [LLFF (Real Forward-Facing)](#llff-real-forward-facing-dataset), [NeRF (Realistic Synthetic)](#nerf-realistic-synthetic-dataset), and [DTU](#dtu-dataset) datasets. -->
 
-## LLFF (Real Forward-Facing) Dataset
-Download `nerf_llff_data.zip` from [here](https://drive.google.com/drive/folders/128yBriW1IG_3NJ5Rp7APSTZsJqdJdfc1) and set its path as `llff_path` in the [config_llff.txt](./configs/config_llff.txt) file.
+## ScanNet (real-world indoor scene) Dataset
+Download `scannet` from [here](https://github.com/ScanNet/ScanNet) and set its path as `scannet_path` in the [1003_scannet.txt](./configs/1003_scannet) file.
 
-For evaluating our generalizable model (`pretrained.ckpt` model in the [pretrained_weights](./pretrained_weights) folder), set the `scene` properly (e.g. fern) and set the number of source views to 9 (nb_views = 9) in the [config_llff.txt](./configs/config_llff.txt) file and run the following command:
-
-```
-python run_geo_nerf.py --config configs/config_llff.txt --eval
-```
-
-For fine-tuning on a specific scene, set nb_views = 7 and run the following command:
+For training a generalizable model, set the number of source views to 8 (nb_views = 8) in the [1003_scannet.txt](./configs/1003_scannet.txt) file and run the following command:
 
 ```
-python run_geo_nerf.py --config configs/config_llff.txt
+python run_geo_nerf.py --config configs/1003_scannet.txt --segmentation --logger wandb --val_save_img_type depth --target_depth_estimation
 ```
 
-Once fine-tuning is finished, run the evaluation command with nb_views = 9 to get the final rendered results.
-
-## NeRF (Realistic Synthetic) Dataset
-Download `nerf_synthetic.zip` from [here](https://drive.google.com/drive/folders/128yBriW1IG_3NJ5Rp7APSTZsJqdJdfc1) and set its path as `nerf_path` in the [config_nerf.txt](configs/config_nerf.txt) file.
-
-For evaluating our generalizable model (`pretrained.ckpt` model in the [pretrained_weights](./pretrained_weights) folder), set the `scene` properly (e.g. lego) and set the number of source views to 9 (nb_views = 9) in the [config_nerf.txt](configs/config_nerf.txt) file and run the following command:
+For evaluation on a novel scene, run the following command: (replace [ckpt path] with your trained checkpoint path.)
 
 ```
-python run_geo_nerf.py --config configs/config_nerf.txt --eval
+python run_geo_nerf.py --config configs/1003_scannet.txt --segmentation --logger none --val_save_img_type depth --target_depth_estimation --ckpt_path [ckpt path] --eval
 ```
 
-For fine-tuning on a specific scene, set nb_views = 7 and run the following command:
+
+## Replica (Synthetic indoor scene) Dataset
+Download `Replica` from [here](https://www.dropbox.com/sh/9yu1elddll00sdl/AAC-rSJdLX0C6HhKXGKMOIija?dl=0) and set its path as `replica_path` in the [0727_replica.txt](configs/0727_replica.txt) file. (Thanks [Semantic Nerf](https://github.com/Harry-Zhi/semantic_nerf) for rendering 2D image and semantic map.)
+
+For training a generalizable model, set the number of source views to 8 (nb_views = 8) in the [0727_replica.txt](./configs/0727_replica.txt) file and run the following command:
 
 ```
-python run_geo_nerf.py --config configs/config_nerf.txt
+python run_geo_nerf.py --config configs/0727_replica.txt --segmentation --logger wandb --val_save_img_type depth --target_depth_estimation
 ```
 
-Once fine-tuning is finished, run the evaluation command with nb_views = 9 to get the final rendered results.
-
-## DTU Dataset
- Download the preprocessed [DTU training data](https://drive.google.com/file/d/1eDjh-_bxKKnEuz5h-HXS7EDJn59clx6V/view) 
-and replace its `Depths` directory with [Depth_raw](https://virutalbuy-public.oss-cn-hangzhou.aliyuncs.com/share/cascade-stereo/CasMVSNet/dtu_data/dtu_train_hr/Depths_raw.zip) from original [MVSNet repository](https://github.com/YoYo000/MVSNet), and set `dtu_pre_path` referring to this dataset in the [config_dtu.txt](configs/config_dtu.txt) file.
-
-Then, download the original `Rectified` images from [DTU Website](https://roboimagedata.compute.dtu.dk/?page_id=36), and set `dtu_path` in the [config_dtu.txt](configs/config_dtu.txt) file accordingly.
-
-For evaluating our generalizable model (`pretrained.ckpt` model in the [pretrained_weights](./pretrained_weights) folder), set the `scene` properly (e.g. scan21) and set the number of source views to 9 (nb_views = 9) in the [config_dtu.txt](./configs/config_dtu.txt) file and run the following command:
+For evaluation on a novel scene, run the following command: (replace [ckpt path] with your trained checkpoint path.)
 
 ```
-python run_geo_nerf.py --config configs/config_dtu.txt --eval
+python run_geo_nerf.py --config configs/0727_replica.txt --segmentation --logger none --val_save_img_type depth --target_depth_estimation --ckpt_path [ckpt path] --eval
 ```
 
-For fine-tuning on a specific scene, use the same nb_views = 9 and run the following command:
+### Self-supervised depth model
+TODO.
 
-```
-python run_geo_nerf.py --config configs/config_dtu.txt
-```
-
-Once fine-tuning is finished, run the evaluation command with nb_views = 9 to get the final rendered results.
-
-### RGBD Compatible model
-By adding `--use_depth` argument to the aforementioned commands, you can use our RGB compatible model on the DTU dataset and exploit the ground truth, low-resolution depths to help the rendering process. The pretrained weights for this model is `pretrained_w_depth.ckpt`.
-
-## Training From Scratch
-For training our model from scratch, first, prepare the following datasets:
-
-* The original `Rectified` images from [DTU](https://roboimagedata.compute.dtu.dk/?page_id=36). Set the corresponding path as  `dtu_path` in the [config_general.txt](configs/config_general.txt) file.
-
-* The preprocessed [DTU training data](https://drive.google.com/file/d/1eDjh-_bxKKnEuz5h-HXS7EDJn59clx6V/view) 
-with the replacement of its `Depths` directory with [Depth_raw](https://virutalbuy-public.oss-cn-hangzhou.aliyuncs.com/share/cascade-stereo/CasMVSNet/dtu_data/dtu_train_hr/Depths_raw.zip). Set the corresponding path as  `dtu_pre_path` in the [config_general.txt](configs/config_general.txt) file.
-
- * LLFF released scenes. Download [real_iconic_noface.zip](https://drive.google.com/drive/folders/1M-_Fdn4ajDa0CS8-iqejv0fQQeuonpKF) and remove the test scenes with the following command:
-    ```
-    unzip real_iconic_noface.zip
-    cd real_iconic_noface/
-    rm -rf data2_fernvlsb data2_hugetrike data2_trexsanta data3_orchid data5_leafscene data5_lotr data5_redflower
-    ```
-    Then, set the corresponding path as  `llff_path` in the [config_general.txt](configs/config_general.txt) file.
-
-* Collected scenes from [IBRNet](https://github.com/googleinterns/IBRNet) ([Subset1](https://drive.google.com/file/d/1rkzl3ecL3H0Xxf5WTyc2Swv30RIyr1R_/view?usp=sharing) and [Subset2](https://drive.google.com/file/d/1Uxw0neyiIn3Ve8mpRsO6A06KfbqNrWuq/view?usp=sharing)). Set the corresponding paths as  `ibrnet1_path` and `ibrnet2_path` in the [config_general.txt](configs/config_general.txt) file.
-
-Also, download `nerf_llff_data.zip` and `nerf_synthetic.zip` from [here](https://drive.google.com/drive/folders/128yBriW1IG_3NJ5Rp7APSTZsJqdJdfc1) for validation and testing and set their corresponding paths as  `llff_test_path` and `nerf_path` in the [config_general.txt](configs/config_general.txt) file.
-
-Once all the datasets are available, train the network from scratch with the following command:
-```
-python run_geo_nerf.py --config configs/config_general.txt
-```
 ### Contact
-You can contact the author through email: mohammad.johari At idiap.ch.
+You can contact the author through email: A88551212@gmail.com
 
-## Citing
+<!-- ## Citing
 If you find our work useful, please consider citing:
 ```BibTeX
 @inproceedings{johari-et-al-2022,
@@ -121,7 +74,7 @@ If you find our work useful, please consider citing:
   booktitle = {Proceedings of the IEEE International Conference on Computer Vision and Pattern Recognition (CVPR)},
   year = {2022}
 }
-```
+``` -->
 
 ### Acknowledgement
-This work was supported by ams OSRAM.
+This work was supported by National Center for High-performance Computing (NCHC) for providing computational and storage resources.
