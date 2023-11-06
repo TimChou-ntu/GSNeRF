@@ -7,6 +7,9 @@ nb_views = 8
 nb_class = 21
 ignore_label = 20
 
+nb_coarse = 4
+nb_fine = 12
+
 ## model
 using_semantic_global_tokens = 1
 only_using_semantic_global_tokens = 0
