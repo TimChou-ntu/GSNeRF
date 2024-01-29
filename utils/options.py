@@ -84,4 +84,6 @@ def config_parser():
     parser.add_argument("--feat_net", type=str, default="UNet", choices=["UNet", "smp_UNet"], help="FeatureNet used in depth estimation")
     # resume options
     parser.add_argument("--ckpt_path", type=str, default=None, help="Path to a checkpoint to resume training")
+    parser.add_argument("--finetune", action="store_true", help="Finetune the model with a checkpoint")
+    parser.add_argument("--fintune_scene", type=str, default="None", help="Scene for fine-tuning")
     return parser.parse_args()

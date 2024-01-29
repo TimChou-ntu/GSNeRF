@@ -36,6 +36,12 @@ class PointSegClassMapping(object):
             self.max_cat_id + 1, dtype=int) * neg_cls
         for cls_idx, cat_id in enumerate(valid_cat_ids):
             self.cat_id2class[cat_id] = cls_idx
+        for i in range(self.cat_id2class.shape[0]):
+            value = self.cat_id2class[i]
+            if value == 19:
+                self.cat_id2class[i] = 3
+            elif value == 20:
+                self.cat_id2class[i] = 19
 
     def __call__(self, seg_label):
         """Call function to map original semantic class to valid category ids.
@@ -207,6 +213,11 @@ def get_database_split(database: BaseDatabase, split_type='val'):
         depth_valid = not(len(splits) > 1 and splits[1] == 'all')
         if database_name.startswith('scannet'):
             img_ids = database.get_img_ids()
+            # train_ids = img_ids[::5]
+            # val_ids = img_ids[10::1]
+            # val_ids = img_ids[2::40]
+            # if len(val_ids) > 10:
+            #     val_ids = val_ids[:10]
             train_ids = img_ids[:700:5]
             val_ids = img_ids[2:700:20]
             if len(val_ids) > 10:

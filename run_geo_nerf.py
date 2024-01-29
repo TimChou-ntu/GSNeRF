@@ -50,6 +50,47 @@ from utils.depth_loss import UnsupLossMultiStage
 
 lpips_fn = lpips.LPIPS(net="vgg")
 
+def compute_depth_errors(gt, pred, var=None):
+    thresh = np.maximum((gt / pred), (pred / gt))
+
+    a1 = (thresh < 1.25).mean()
+    a2 = (thresh < 1.25 ** 2).mean()
+    a3 = (thresh < 1.25 ** 3).mean()
+
+    abs_diff = np.mean(np.abs(gt - pred))
+
+    abs_rel = np.mean(np.abs(gt - pred) / gt)
+    sq_rel = np.mean(((gt - pred) ** 2) / gt)
+
+    rmse = (gt - pred) ** 2
+    rmse = np.sqrt(rmse.mean())
+
+    rmse_log = (np.log(gt) - np.log(pred)) ** 2
+    rmse_log = np.sqrt(rmse_log.mean())
+
+    err = np.log(pred) - np.log(gt)
+    silog = np.sqrt(np.mean(err ** 2) - np.mean(err) ** 2) * 100
+
+    log_10 = (np.abs(np.log10(gt) - np.log10(pred))).mean()
+
+    irmse = (1/gt - 1/pred) ** 2
+    irmse = np.sqrt(irmse.mean())
+
+    if var is not None:
+        var[var < 1e-6] = 1e-6
+        nll = 0.5 * (np.log(var) + np.log(2*np.pi) + (np.square(gt - pred) / var))
+        nll = np.mean(nll)
+    else:
+        nll = 0.0
+
+    return dict(a1=a1, a2=a2, a3=a3,
+                abs_diff=abs_diff,
+                abs_rel=abs_rel, sq_rel=sq_rel,
+                rmse=rmse, log_10=log_10, irmse=irmse,
+                rmse_log=rmse_log, silog=silog,
+                nll=nll)
+    
+
 class GeoNeRF(LightningModule):
     def __init__(self, hparams):
         super(GeoNeRF, self).__init__()
@@ -557,7 +598,8 @@ class GeoNeRF(LightningModule):
             img_err_abs = (rendered_rgb_masked - img_gt_masked).abs()
             semantic_logits_img = torch.from_numpy(lable_color_map[torch.argmax(semantic_logits, dim=2).cpu()])[0].permute(0, 3, 1, 2)
             semantic_gt_img = torch.from_numpy(lable_color_map[batch["semantics"][0, :nb_views].cpu()]).permute(0, 3, 1, 2)
-
+            # depth_err_abs = (rendered_depth - batch["depths_h"][0, -1].cpu()).abs()
+            # semantic_err = rendered_semantic_pred != batch["semantics"][0, -1].cpu()
             ## Compute miou
             if self.hparams.segmentation:
                 iou_score = self.miou(
@@ -598,6 +640,12 @@ class GeoNeRF(LightningModule):
                     rendered_depth, depth_target, mask_target, self.eval_metric[2]
                 ).sum()
                 loss["mask_sum"] = mask_target.float().sum()
+                
+                d1 = compute_depth_errors(depth_target[mask_target].numpy(), target_depth_estimation[mask_target].cpu().numpy())
+                d2 = compute_depth_errors(depth_target[mask_target].numpy(), rendered_depth[mask_target].numpy())
+                for key in d1.keys():
+                    loss[f"val_{key}_estimate"] = d1[key]
+                    loss[f"val_{key}_render"] = d2[key]
             
             depth_minmax = [
                 0.9 * batch["near_fars"].min().detach().cpu().numpy(),
@@ -638,9 +686,20 @@ class GeoNeRF(LightningModule):
                     f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/{folder}/{self.global_step:08d}/{self.wr_cntr:02d}_semantic_gt.png",
                     (semantic_gt_vis * 255).astype("uint8"),
                 )
-
-
-
+                # # normalized depth error to 0~1
+                # depth_err_abs = torch.clamp(
+                #     (depth_err_abs - depth_err_abs.min()) / (depth_err_abs.max() - depth_err_abs.min()), 0, 1
+                # )
+                # depth_err_abs = depth_err_abs.numpy()
+                # semantic_err = semantic_err.numpy()
+                # imageio.imwrite(
+                #     f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/{folder}/error/{self.wr_cntr:02d}_depth_err_abs.png",
+                #     (depth_err_abs * 255).astype("uint8"),
+                # )
+                # imageio.imwrite(
+                #     f"{self.hparams.logdir}/{self.hparams.dataset_name}/{self.hparams.expname}/{folder}/error/{self.wr_cntr:02d}_semantic_err.png",
+                #     (semantic_err * 255).astype("uint8"),
+                # )
                 rendered_depth_vis, _ = visualize_depth(rendered_depth)
 
                 img_vis = (
@@ -802,6 +861,40 @@ class GeoNeRF(LightningModule):
             torch.stack([x[f"val_acc_{self.eval_metric[2]}mm"] for x in outputs]).sum()
             / mask_sum
         )
+        # calculate depth estimation error
+        if False:
+            '''
+            a1=a1, a2=a2, a3=a3,
+                abs_diff=abs_diff,
+                abs_rel=abs_rel, sq_rel=sq_rel,
+                rmse=rmse, log_10=log_10, irmse=irmse,
+                rmse_log=rmse_log, silog=silog,
+                nll=nll
+            '''
+            self.log("val/a1_estimate", np.stack([x["val_a1_estimate"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/a1_render", np.stack([x["val_a1_render"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/a2_estimate", np.stack([x["val_a2_estimate"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/a2_render", np.stack([x["val_a2_render"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/a3_estimate", np.stack([x["val_a3_estimate"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/a3_render", np.stack([x["val_a3_render"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/abs_diff_estimate", np.stack([x["val_abs_diff_estimate"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/abs_diff_render", np.stack([x["val_abs_diff_render"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/abs_rel_estimate", np.stack([x["val_abs_rel_estimate"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/abs_rel_render", np.stack([x["val_abs_rel_render"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/sq_rel_estimate", np.stack([x["val_sq_rel_estimate"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/sq_rel_render", np.stack([x["val_sq_rel_render"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/rmse_estimate", np.stack([x["val_rmse_estimate"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/rmse_render", np.stack([x["val_rmse_render"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/log_10_estimate", np.stack([x["val_log_10_estimate"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/log_10_render", np.stack([x["val_log_10_render"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/irmse_estimate", np.stack([x["val_irmse_estimate"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/irmse_render", np.stack([x["val_irmse_render"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/rmse_log_estimate", np.stack([x["val_rmse_log_estimate"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/rmse_log_render", np.stack([x["val_rmse_log_render"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/silog_estimate", np.stack([x["val_silog_estimate"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/silog_render", np.stack([x["val_silog_render"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/nll_estimate", np.stack([x["val_nll_estimate"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
+            self.log("val/nll_render", np.stack([x["val_nll_render"] for x in outputs]).mean(), prog_bar=False,sync_dist =True)
 
         self.log("val/PSNR", mean_psnr, prog_bar=False,sync_dist =True)
         self.log("val/SSIM", mean_ssim, prog_bar=False,sync_dist =True)
@@ -895,7 +988,12 @@ if __name__ == "__main__":
     )
 
     if not args.eval:  ## Train
-        if args.scene != "None":  ## Fine-tune
+        if args.finetune:
+            ckpt_file = "/mnt/sdb/timothy/Desktop/2023Spring/generalized_nerf/logs_scannet/scannet/1003_scannet/ckpts/ckpt_step-169947.ckpt"
+            print(f"load pretrained weights from scannet_{ckpt_file}")
+            load_ckpt(geonerf.geo_reasoner, ckpt_file, "geo_reasoner")
+            load_ckpt(geonerf.renderer, ckpt_file, "renderer")
+        elif args.scene != "None":  ## Fine-tune
             if args.use_depth:
                 ckpt_file = "pretrained_weights/pretrained_w_depth.ckpt"
             else:

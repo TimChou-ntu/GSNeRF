@@ -118,6 +118,7 @@ class RendererDataset(Dataset):
             elif self.cfg['resolution_type']=='lr':
                 type2scene_names={
                     'scannet': np.loadtxt('configs/lists/scannetv2_train_split.txt',dtype=str).tolist(),
+                    'scannet_single': [self.cfg['val_database_name']],
                 }
             else:
                 raise NotImplementedError

@@ -335,14 +335,27 @@ class Renderer(nn.Module):
         tokens = torch.cat([tokens, var_mean], dim=1)
 
         # by adding middle_pts_mask, we can only take the predicted depth's points into account
+        # index = torch.nonzero(middle_pts_mask, as_tuple=False)
+        # row_index = index[:, 0]
+        # col_index = index[:, 1]
+        # num = 6
+        # start_index = col_index - 6
+        # end_index = col_index 
+        # mask = torch.zeros(middle_pts_mask.shape, dtype=torch.bool)
+        # for i in range(mask.shape[0]):
+        #     mask[i, start_index[i]:end_index[i]] = True
+        # pool_feat = semantic_feat[mask.view(-1)].reshape(N, num, 8, 189).mean(dim=1)
+        
         if self.using_semantic_global_tokens:
             semantic_var_mean = torch.var_mean(semantic_feat[middle_pts_mask.view(-1)], dim=1, unbiased=False, keepdim=True)
+            # semantic_var_mean = torch.var_mean(pool_feat, dim=1, unbiased=False, keepdim=True)
             semantic_var_mean = torch.cat(semantic_var_mean, dim=-1)
             semantic_var_mean = F.elu(self.semantic_var_mean_fc1(semantic_var_mean))
             semantic_var_mean = F.elu(self.semantic_var_mean_fc2(semantic_var_mean))
         # (N_rays, 1, views, feat_dim)
         semantic_tokens = F.elu(
             self.semantic_token_gen(torch.cat([semantic_feat[middle_pts_mask.view(-1)], vis_mask[middle_pts_mask.view(-1)]], dim=-1))
+            # self.semantic_token_gen(torch.cat([pool_feat, vis_mask[middle_pts_mask.view(-1)]], dim=-1))
         )
 
         if self.using_semantic_global_tokens:

@@ -44,7 +44,15 @@ def get_training_dataset(args, downsample=1.0):
         return train_dataset, train_sampler
     
     elif args.dataset_name == "scannet":
-        cfg = {'min_wn': args.nb_views, 'max_wn': args.nb_views+1}
+        if args.finetune:
+            cfg = {
+                'val_database_name': args.fintune_scene,
+                'min_wn': args.nb_views, 'max_wn': args.nb_views+1,
+                'type2sample_weights': {'scannet_single': 1},
+                'train_database_types': ['scannet_single'],
+            }
+        else:
+            cfg = {'min_wn': args.nb_views, 'max_wn': args.nb_views+1}
         train_dataset = RendererDataset(
             root_dir=args.scannet_path,
             is_train=True,
@@ -193,6 +201,10 @@ def get_validation_dataset(args, downsample=1.0):
         )
     elif args.dataset_name == "scannet":
         val_set_list, val_set_names = [], []
+        if args.finetune:
+            val_cfg = {'val_database_name': args.fintune_scene,'min_wn': args.nb_views, 'max_wn': args.nb_views+1}
+            val_set = RendererDataset(cfg=val_cfg, is_train=False, root_dir=args.scannet_path)
+            return val_set
         if isinstance(args.val_set_list, str):
             val_scenes = np.loadtxt(args.val_set_list, dtype=str).tolist()
             for name in val_scenes:
@@ -201,6 +213,8 @@ def get_validation_dataset(args, downsample=1.0):
                 val_set_list.append(val_set)
                 val_set_names.append(name)
                 print(f'{name} val set len {len(val_set)}')
+                # print("only one scene")
+                # break
         val_dataset = ConcatDataset(val_set_list)
     elif args.dataset_name == "replica":
         val_set_list, val_set_names = [], []
