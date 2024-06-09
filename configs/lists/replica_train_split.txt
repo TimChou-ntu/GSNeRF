@@ -1,0 +1,12 @@
+replica/office_0/Sequence_1/black_320
+replica/office_0/Sequence_2/black_320
+replica/office_1/Sequence_1/black_320
+replica/office_1/Sequence_2/black_320
+replica/office_2/Sequence_1/black_320
+replica/office_2/Sequence_2/black_320
+replica/office_3/Sequence_1/black_320
+replica/office_3/Sequence_2/black_320
+replica/room_0/Sequence_1/black_320
+replica/room_0/Sequence_2/black_320
+replica/room_1/Sequence_1/black_320
+replica/room_1/Sequence_2/black_320
