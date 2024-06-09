@@ -1,5 +1,5 @@
 ### INPUT
-expname = 1003_scannet
+expname = scannet
 logdir = ./logs_scannet/
 nb_views = 8
 
@@ -20,7 +20,7 @@ feat_net = smp_UNet
 dataset_name = scannet
 scannet_path = "/mnt/sdb/timothy/Desktop/2023Spring/Semantic-Ray/data/scannet"
 scene = None
-val_set_list = "configs/lists/scannetv2_test_split_pick.txt"
+val_set_list = "configs/lists/scannet_test_split.txt"
 
 ### TESTING
 chunk = 4096  ### Reduce it to save memory

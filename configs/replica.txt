@@ -1,5 +1,5 @@
 ### INPUT
-expname = 0727_replica
+expname = replica
 logdir = ./logs_replica/
 nb_views = 8
 
