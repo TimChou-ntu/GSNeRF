@@ -11,3 +11,5 @@ ipdb
 scikit-learn
 pandas
 natsort
+segmentation-models-pytorch
+wandb
