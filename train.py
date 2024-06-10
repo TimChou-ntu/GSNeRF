@@ -882,7 +882,8 @@ if __name__ == "__main__":
         f"{args.logdir}/{args.dataset_name}/{args.expname}/ckpts",
         filename="ckpt_step-{step:06d}",
         auto_insert_metric_name=False,
-        save_top_k=-1,
+        monitor="val/mIoU",
+        save_top_k=2,
     )
 
     ## Setting up a logger
@@ -924,14 +925,7 @@ if __name__ == "__main__":
             print(f"load pretrained weights from scannet_{ckpt_file}")
             load_ckpt(gsnerf.geo_reasoner, ckpt_file, "geo_reasoner")
             load_ckpt(gsnerf.renderer, ckpt_file, "renderer")
-        elif args.scene != "None":  ## Fine-tune
-            if args.use_depth:
-                ckpt_file = "pretrained_weights/pretrained_w_depth.ckpt"
-            else:
-                ckpt_file = "pretrained_weights/pretrained.ckpt"
-            load_ckpt(gsnerf.geo_reasoner, ckpt_file, "geo_reasoner")
-            load_ckpt(gsnerf.renderer, ckpt_file, "renderer")
-        elif not args.use_depth:  ## Generalizable
+        else:  ## Generalizable
             print("!!! NOT Loading pretrained weights from Cascade MVSNet!!!")
 
         trainer.fit(gsnerf)
